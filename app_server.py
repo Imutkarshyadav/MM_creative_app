@@ -82,7 +82,7 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
                         if creative_col and status_col and date_col:
                             df[date_col] = df[date_col].ffill()
                             
-                            for _, row in df.iterrows():
+                            for row_number, (_, row) in enumerate(df.iterrows(), start=2):
                                 et_name = row[creative_col]
                                 if pd.isna(et_name) or str(et_name).strip() == "":
                                     continue
@@ -130,6 +130,7 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
                                 
                                 results.append({
                                     "tab": tab_name_str,
+                                    "row_number": row_number,
                                     "date": str(display_date_str),
                                     "filter_date": filter_date_str,
                                     "et": et_name_str,

@@ -282,12 +282,15 @@
         let globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
         let selectedCreativeVersion = '';
         let lastCreativeStates = null;
+        let lastCreativeRows = null;
         const removedDoneCountsByCreative = new Map();
         const AUTO_SYNC_INTERVAL_MS = 5000;
         let alertsEnabled = false;
         let notificationSequence = 0;
         let deferredInstallPrompt = null;
         let lastNotificationState = 'unset';
+        const queuedNotificationToasts = [];
+        let isShowingQueuedNotificationToast = false;
 
         function showNotificationToast(title, message, tone = 'info') {
             const toast = document.getElementById('notification-toast');
@@ -317,6 +320,27 @@
                     toast.classList.remove('flex', 'opacity-0');
                 }, 200);
             }, 3200);
+        }
+
+        function showQueuedNotificationToast(title, message, tone = 'success') {
+            queuedNotificationToasts.push({ title, message, tone });
+            if (isShowingQueuedNotificationToast) return;
+
+            const showNextToast = () => {
+                const nextToast = queuedNotificationToasts.shift();
+                if (!nextToast) {
+                    isShowingQueuedNotificationToast = false;
+                    return;
+                }
+
+                isShowingQueuedNotificationToast = true;
+                showNotificationToast(nextToast.title, nextToast.message, nextToast.tone);
+                setTimeout(() => {
+                    showNextToast();
+                }, 3400);
+            };
+
+            showNextToast();
         }
 
         function showInstallButton() {
@@ -507,14 +531,19 @@
 
         function showCreativeUpdateNotification(newData) {
             const currentStates = new Map();
+            const currentRows = new Map();
             for (const item of newData) {
                 let creatives = currentStates.get(item.tab);
                 if (!creatives) {
                     creatives = new Map();
                     currentStates.set(item.tab, creatives);
+                    currentRows.set(item.tab, new Map());
                 }
 
                 const creativeName = String(item.et || '');
+                if (item.row_number !== undefined && item.row_number !== null) {
+                    currentRows.get(item.tab).set(String(item.row_number), creativeName);
+                }
                 let state = creatives.get(creativeName);
                 if (!state) {
                     state = { total: 0, done: 0, statusCounts: new Map(), dateCounts: new Map() };
@@ -530,6 +559,7 @@
 
             if (!lastCreativeStates) {
                 lastCreativeStates = currentStates;
+                lastCreativeRows = currentRows;
                 return;
             }
 
@@ -538,6 +568,34 @@
                 const previousCreatives = lastCreativeStates.get(tab) || new Map();
                 const currentCreatives = currentStates.get(tab) || new Map();
                 const creativeNames = new Set([...previousCreatives.keys(), ...currentCreatives.keys()]);
+                const previousRows = lastCreativeRows?.get(tab) || new Map();
+                const nextRows = currentRows.get(tab) || new Map();
+                const replacementAddedCounts = new Map();
+                const replacementRemovedCounts = new Map();
+
+                for (const [rowNumber, newCreativeName] of nextRows) {
+                    const oldCreativeName = previousRows.get(rowNumber);
+                    if (oldCreativeName === undefined || oldCreativeName === newCreativeName) continue;
+
+                    replacementRemovedCounts.set(
+                        oldCreativeName,
+                        (replacementRemovedCounts.get(oldCreativeName) || 0) + 1
+                    );
+                    replacementAddedCounts.set(
+                        newCreativeName,
+                        (replacementAddedCounts.get(newCreativeName) || 0) + 1
+                    );
+                    const title = `🔄 Creative Replaced · ${tab}`;
+                    const message = `Old creative: ${oldCreativeName}\nNew creative: ${newCreativeName}`;
+                    const tag = `creative-replaced-${encodeURIComponent(tab)}-${rowNumber}`;
+                    if ('Notification' in window
+                        && window.isSecureContext
+                        && Notification.permission === 'granted') {
+                        showDesktopNotification(title, message, tag);
+                    }
+                    showQueuedNotificationToast(title, message, 'info');
+                }
+
                 const wasFullyDone = previousCreatives.size > 0
                     && [...previousCreatives.values()].every(creative => creative.done === creative.total);
                 const isFullyDone = currentCreatives.size > 0
@@ -550,8 +608,14 @@
                     const current = currentCreatives.get(creativeName) || {
                         total: 0, done: 0, statusCounts: new Map(), dateCounts: new Map()
                     };
-                    const added = Math.max(0, current.total - previous.total);
-                    const removed = Math.max(0, previous.total - current.total);
+                    const added = Math.max(
+                        0,
+                        current.total - previous.total - (replacementAddedCounts.get(creativeName) || 0)
+                    );
+                    const removed = Math.max(
+                        0,
+                        previous.total - current.total - (replacementRemovedCounts.get(creativeName) || 0)
+                    );
                     const regressed = Math.max(0, previous.done - current.done - removed);
                     const newlyDone = Math.max(0, current.done - previous.done - added);
 
@@ -619,15 +683,22 @@
                 if (!wasFullyDone && isFullyDone) {
                     const completedCreativeCount = [...currentCreatives.values()]
                         .reduce((count, creative) => count + creative.total, 0);
-                    sendSheetChangeNotification(
-                        `✅ ET Completed: ${tab}`,
-                        `All ${completedCreativeCount} creatives are done.`,
-                        `creative-uploadings-done-${encodeURIComponent(tab)}`
-                    );
+                    const title = `✅ ET Completed: ${tab}`;
+                    const message = `All ${completedCreativeCount} creatives are done.`;
+                    const canShowDesktopNotification = 'Notification' in window
+                        && window.isSecureContext
+                        && Notification.permission === 'granted';
+                    const tag = `creative-uploadings-done-${encodeURIComponent(tab)}`;
+                    if (canShowDesktopNotification) {
+                        showDesktopNotification(title, message, tag);
+                    } else {
+                        showQueuedNotificationToast(title, message);
+                    }
                 }
             }
 
             lastCreativeStates = currentStates;
+            lastCreativeRows = currentRows;
         }
 
         function getCountChanges(previousCounts, currentCounts) {

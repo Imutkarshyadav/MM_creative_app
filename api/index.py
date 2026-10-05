@@ -171,6 +171,7 @@ def sync_data():
                 
                 results.append({
                     "tab": tab_name_str,
+                    "row_number": row_number,
                     "date": str(display_date_str),
                     "filter_date": filter_date_str,
                     "et": et_name_str,
