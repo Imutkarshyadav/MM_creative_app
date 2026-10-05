@@ -1,8 +1,0 @@
-.venv/
-**/.venv/
-__pycache__/
-**/__pycache__/
-*.py[cod]
-.vercel/
-creative_history.json
-Creative_Uploadings_Report/

@@ -1,0 +1,17 @@
+{
+  "name": "Creative Uploadings Report",
+  "short_name": "Creative Report",
+  "description": "Track creative upload statuses and browser alerts for sheet updates.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -3,8 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="description" content="Track creative upload status changes and receive browser alerts for updates.">
     <title>Creative Uploadings Report</title>
     <link rel="icon" type="image/png" href="logo.png">
+    <link rel="manifest" href="/manifest.json">
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Google Fonts: Inter -->
@@ -19,9 +24,60 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        @media (max-width: 640px) {
+            #notification-btn {
+                min-width: 0;
+                padding-left: 0.8rem;
+                padding-right: 0.8rem;
+            }
+
+            #notification-btn-text {
+                white-space: nowrap;
+            }
+
+            #status-badge {
+                max-width: 36vw;
+            }
+
+            #sync-btn {
+                min-width: 110px;
+            }
+        }
     </style>
 </head>
 <body class="bg-slate-50/50 m-0 p-0 min-h-screen flex flex-col text-slate-800 selection:bg-blue-100 selection:text-blue-900">
+
+    <div id="install-app-banner" class="fixed inset-x-3 bottom-3 z-[80] hidden md:inset-x-auto md:right-4 md:bottom-4 md:w-[360px]">
+        <div class="rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-2xl shadow-slate-900/20 backdrop-blur-xl">
+            <div class="flex items-start gap-3">
+                <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-lg text-white shadow-lg shadow-slate-900/20">
+                    <i class="fa-solid fa-mobile-screen-button"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Install app</p>
+                    <h3 class="mt-1 text-base font-black text-slate-900">Add this dashboard to your home screen</h3>
+                    <p class="mt-1 text-xs leading-relaxed text-slate-500">Get faster access and keep mobile alerts ready on the go.</p>
+                </div>
+            </div>
+            <div class="mt-3 flex items-center justify-end gap-2">
+                <button type="button" id="dismiss-install-btn" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50">Later</button>
+                <button type="button" id="install-app-btn" class="rounded-xl bg-slate-900 px-3 py-2 text-xs font-bold text-white shadow-lg shadow-slate-900/15 transition-colors hover:bg-slate-800">Install</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="notification-toast" class="pointer-events-none fixed left-1/2 top-4 z-[90] hidden w-[calc(100%-1.5rem)] max-w-md -translate-x-1/2 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl shadow-slate-900/10 backdrop-blur-xl transition-all duration-200">
+        <div class="flex items-center gap-3">
+            <div id="notification-toast-icon" class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-sm text-blue-600">
+                <i class="fa-solid fa-bell"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+                <p id="notification-toast-title" class="text-sm font-bold text-slate-800">Alerts ready</p>
+                <p id="notification-toast-message" class="text-xs text-slate-500">Keep notifications enabled for live updates.</p>
+            </div>
+        </div>
+    </div>
 
     <!-- Top Navigation Bar -->
     <header class="sticky top-0 z-50 bg-white/80 backdrop-blur-lg border-b border-slate-200 shadow-sm shrink-0">
@@ -43,7 +99,7 @@
                         <span id="status-text" class="min-w-0 truncate">Standby</span>
                     </div>
 
-                    <button type="button" id="notification-btn" onclick="enableDesktopNotifications()" class="flex shrink-0 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100" title="Enable desktop notifications">
+                    <button type="button" id="notification-btn" onclick="enableDesktopNotifications()" aria-pressed="false" class="flex shrink-0 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100" title="Enable desktop notifications">
                         <i class="fa-regular fa-bell" id="notification-icon"></i>
                         <span id="notification-btn-text">Enable Alerts</span>
                     </button>
@@ -94,6 +150,20 @@
 
         </div>
     </header>
+
+    <div id="mute-alerts-dialog" class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-950/40 p-4 opacity-0 backdrop-blur-sm transition-opacity duration-200" role="dialog" aria-modal="true" aria-labelledby="mute-alerts-title" aria-describedby="mute-alerts-description">
+        <div id="mute-alerts-panel" class="w-full max-w-sm scale-95 rounded-3xl border border-white/70 bg-white p-6 opacity-0 shadow-2xl shadow-slate-900/20 transition-all duration-200 sm:p-7">
+            <div class="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 ring-1 ring-amber-100">
+                <i class="fa-solid fa-bell-slash text-xl" aria-hidden="true"></i>
+            </div>
+            <h2 id="mute-alerts-title" class="text-center text-xl font-black tracking-tight text-slate-900">Mute desktop alerts?</h2>
+            <p id="mute-alerts-description" class="mt-2 text-center text-sm leading-relaxed text-slate-500">You won’t receive notifications about new creatives or sheet updates. You can turn alerts back on anytime.</p>
+            <div class="mt-7 grid grid-cols-2 gap-3">
+                <button type="button" id="keep-alerts-btn" class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100">Keep On</button>
+                <button type="button" id="mute-alerts-btn" class="rounded-xl bg-slate-800 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-slate-900/15 transition-colors hover:bg-slate-900 focus:outline-none focus:ring-4 focus:ring-slate-200">Mute Alerts</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Main Content Area -->
     <main class="min-w-0 p-3 max-w-[1600px] mx-auto w-full flex-grow flex flex-col gap-4 pb-16 sm:p-8 sm:gap-8">
@@ -227,63 +297,150 @@
         let globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
         let selectedCreativeVersion = '';
         let lastCreativeStates = null;
-        const queuedPendingNotifications = new Map();
-        const queuedCompletedETs = new Set();
+        const removedDoneCountsByCreative = new Map();
         const AUTO_SYNC_INTERVAL_MS = 5000;
+        let alertsEnabled = false;
+        let notificationSequence = 0;
+        let deferredInstallPrompt = null;
+        let lastNotificationState = 'unset';
 
-                function updateNotificationButton() {
+        function showNotificationToast(title, message, tone = 'info') {
+            const toast = document.getElementById('notification-toast');
+            const icon = document.getElementById('notification-toast-icon');
+            const toastTitle = document.getElementById('notification-toast-title');
+            const toastMessage = document.getElementById('notification-toast-message');
+            if (!toast || !icon || !toastTitle || !toastMessage) return;
+
+            const toneClasses = {
+                info: 'border-blue-100 bg-blue-50 text-blue-600',
+                success: 'border-emerald-100 bg-emerald-50 text-emerald-600',
+                warning: 'border-amber-100 bg-amber-50 text-amber-600',
+                error: 'border-red-100 bg-red-50 text-red-600'
+            };
+
+            icon.className = `flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${toneClasses[tone] || toneClasses.info}`;
+            toastTitle.textContent = title;
+            toastMessage.textContent = message;
+            toast.classList.remove('hidden');
+            toast.classList.add('flex');
+
+            clearTimeout(showNotificationToast.timeoutId);
+            showNotificationToast.timeoutId = setTimeout(() => {
+                toast.classList.add('opacity-0');
+                setTimeout(() => {
+                    toast.classList.add('hidden');
+                    toast.classList.remove('flex', 'opacity-0');
+                }, 200);
+            }, 3200);
+        }
+
+        function showInstallBanner() {
+            const banner = document.getElementById('install-app-banner');
+            if (!banner || window.matchMedia('(display-mode: standalone)').matches) return;
+            banner.classList.remove('hidden');
+        }
+
+        function hideInstallBanner() {
+            const banner = document.getElementById('install-app-banner');
+            if (!banner) return;
+            banner.classList.add('hidden');
+        }
+
+        async function installApp() {
+            if (!deferredInstallPrompt) {
+                showNotificationToast('Install not available', 'Use the browser menu to install this app on your device.', 'warning');
+                return;
+            }
+
+            deferredInstallPrompt.prompt();
+            const choice = await deferredInstallPrompt.userChoice;
+            if (choice.outcome === 'accepted') {
+                showNotificationToast('App installed', 'The dashboard is ready from your home screen.', 'success');
+            } else {
+                showNotificationToast('Install dismissed', 'You can install it later from the browser menu.', 'info');
+            }
+            deferredInstallPrompt = null;
+            hideInstallBanner();
+        }
+
+        function updateNotificationButton() {
             const button = document.getElementById('notification-btn');
             const buttonText = document.getElementById('notification-btn-text');
             const icon = document.getElementById('notification-icon');
             if (!button || !buttonText || !icon) return;
 
+            button.disabled = false;
+            button.classList.remove('cursor-not-allowed', 'opacity-60', 'cursor-default');
+            button.classList.remove(
+                'border-blue-200', 'bg-blue-50', 'text-blue-700', 'hover:bg-blue-100',
+                'border-emerald-200', 'bg-emerald-50', 'text-emerald-700',
+                'border-slate-300', 'bg-slate-100', 'text-slate-600', 'hover:bg-slate-200'
+            );
+
+            let state = 'ready';
             if (!('Notification' in window)) {
+                state = 'unsupported';
                 buttonText.textContent = 'Alerts Unavailable';
                 button.title = 'This browser does not support desktop notifications';
                 button.disabled = true;
                 button.classList.add('cursor-not-allowed', 'opacity-60');
-                return;
-            }
-
-            if (!window.isSecureContext) {
+                button.setAttribute('aria-pressed', 'false');
+            } else if (!window.isSecureContext) {
+                state = 'https';
                 buttonText.textContent = 'Use HTTPS';
                 button.title = 'Desktop notifications require HTTPS or localhost';
                 button.disabled = true;
                 button.classList.add('cursor-not-allowed', 'opacity-60');
-                return;
-            }
-
-            if (Notification.permission === 'granted') {
-                button.disabled = false;
-                button.classList.remove('cursor-default', 'cursor-not-allowed');
-                
-                if (localStorage.getItem('appAlertsEnabled') === 'false') {
-                    buttonText.textContent = 'Alerts Off';
-                    button.title = 'Click to enable desktop notifications';
-                    icon.className = 'fa-solid fa-bell-slash text-slate-500';
-                    button.className = 'inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold tracking-wide transition-all border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 active:scale-95';
-                } else {
-                    buttonText.textContent = 'Alerts On';
-                    button.title = 'Click to turn off desktop notifications';
-                    icon.className = 'fa-solid fa-bell';
-                    button.className = 'inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold tracking-wide transition-all border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 active:scale-95';
-                    flushQueuedNotifications();
-                }
+                button.setAttribute('aria-pressed', 'false');
             } else if (Notification.permission === 'denied') {
+                state = 'denied';
                 buttonText.textContent = 'Allow in Browser';
-                button.title = 'Notifications are blocked. Allow them in this site\'s browser settings.';
+                button.title = 'Notifications are blocked. Allow them in this site’s browser settings.';
                 button.disabled = true;
                 icon.className = 'fa-solid fa-bell-slash';
-                button.classList.add('cursor-not-allowed');
-            } else {
+                button.classList.add('cursor-not-allowed', 'opacity-60', 'border-slate-300', 'bg-slate-100', 'text-slate-600');
+                button.setAttribute('aria-pressed', 'false');
+            } else if (alertsEnabled && Notification.permission === 'granted') {
+                state = 'on';
+                buttonText.textContent = 'Alerts On';
+                button.title = 'Click to mute desktop notifications';
+                icon.className = 'fa-solid fa-bell';
+                button.classList.add('border-emerald-200', 'bg-emerald-50', 'text-emerald-700', 'hover:bg-emerald-100');
+                button.setAttribute('aria-pressed', 'true');
+            } else if (Notification.permission === 'default') {
+                state = 'default';
                 buttonText.textContent = 'Enable Alerts';
-                button.title = 'Enable desktop notifications';
-                button.disabled = false;
+                button.title = 'Click to enable desktop notifications';
+                icon.className = 'fa-regular fa-bell';
+                button.classList.add('border-blue-200', 'bg-blue-50', 'text-blue-700', 'hover:bg-blue-100');
+                button.setAttribute('aria-pressed', 'false');
+            } else {
+                state = 'off';
+                buttonText.textContent = 'Alerts Off';
+                button.title = 'Click to enable desktop notifications';
+                icon.className = 'fa-solid fa-bell-slash';
+                button.classList.add('border-slate-300', 'bg-slate-100', 'text-slate-600', 'hover:bg-slate-200');
+                button.setAttribute('aria-pressed', 'false');
+            }
+
+            if (state !== lastNotificationState) {
+                lastNotificationState = state;
+                const messageMap = {
+                    unsupported: ['Browser unsupported', 'This browser cannot show desktop alerts.', 'warning'],
+                    https: ['Secure connection required', 'Use HTTPS or localhost to enable alerts for this page.', 'warning'],
+                    denied: ['Alerts blocked', 'Open your browser settings to allow notifications.', 'error'],
+                    on: ['Alerts ready', 'Desktop notifications are enabled for live updates.', 'success'],
+                    default: ['Alerts ready', 'Choose Enable Alerts to get live sheet updates.', 'info'],
+                    off: ['Alerts off', 'Desktop notifications are currently muted.', 'info']
+                };
+                const [title, message, tone] = messageMap[state] || ['Alerts ready', 'Keep alerts enabled for live updates.', 'info'];
+                if (state === 'unsupported' || state === 'https' || state === 'denied' || state === 'default' || state === 'off' || state === 'on') {
+                    showNotificationToast(title, message, tone);
+                }
             }
         }
 
-                async function enableDesktopNotifications() {
-            const buttonText = document.getElementById('notification-btn-text');
+        async function enableDesktopNotifications() {
             if (!('Notification' in window)) {
                 updateNotificationButton();
                 return;
@@ -297,166 +454,223 @@
                 return;
             }
 
+            if (alertsEnabled && Notification.permission === 'granted') {
+                openMuteAlertsDialog();
+                return;
+            }
+
             if (Notification.permission === 'granted') {
-                if (localStorage.getItem('appAlertsEnabled') === 'false') {
-                    localStorage.setItem('appAlertsEnabled', 'true');
-                    updateNotificationButton();
-                    showDesktopNotification(
-                        'Alerts Enabled',
-                        'You will now receive desktop notifications.',
-                        'creative-uploadings-enabled'
-                    );
-                } else {
-                    if (confirm('Are you sure you want to turn off desktop notifications?')) {
-                        localStorage.setItem('appAlertsEnabled', 'false');
-                        updateNotificationButton();
-                    }
-                }
+                alertsEnabled = true;
+                updateNotificationButton();
                 return;
             }
 
             try {
                 const permission = await Notification.requestPermission();
                 if (permission === 'granted') {
-                    localStorage.setItem('appAlertsEnabled', 'true');
-                    updateNotificationButton();
-                    showDesktopNotification(
-                        'Creative Uploadings Alerts Enabled',
-                        'You will be notified about new pending creatives and ETs completed.',
-                        'creative-uploadings-enabled'
-                    );
-                } else if (buttonText) {
-                    buttonText.textContent = 'Permission Needed';
+                    alertsEnabled = true;
                 }
                 updateNotificationButton();
             } catch (error) {
                 console.error('Could not enable desktop notifications:', error);
-                if (buttonText) buttonText.textContent = 'Enable Failed';
+                updateNotificationButton();
             }
+        }
+
+        function openMuteAlertsDialog() {
+            const dialog = document.getElementById('mute-alerts-dialog');
+            const panel = document.getElementById('mute-alerts-panel');
+            const keepButton = document.getElementById('keep-alerts-btn');
+            if (!dialog || !panel || !keepButton) return;
+
+            dialog.classList.remove('hidden');
+            dialog.classList.add('flex');
+            requestAnimationFrame(() => {
+                dialog.classList.remove('opacity-0');
+                panel.classList.remove('scale-95', 'opacity-0');
+                keepButton.focus();
+            });
+        }
+
+        function closeMuteAlertsDialog() {
+            const dialog = document.getElementById('mute-alerts-dialog');
+            const panel = document.getElementById('mute-alerts-panel');
+            if (!dialog || !panel) return;
+
+            dialog.classList.add('opacity-0');
+            panel.classList.add('scale-95', 'opacity-0');
+            window.setTimeout(() => {
+                dialog.classList.add('hidden');
+                dialog.classList.remove('flex');
+                document.getElementById('notification-btn')?.focus();
+            }, 200);
+        }
+
+        function muteDesktopNotifications() {
+            alertsEnabled = false;
+            updateNotificationButton();
+            closeMuteAlertsDialog();
         }
 
         function showDesktopNotification(title, body, tag) {
             const notification = new Notification(title, {
                 body,
-                tag,
+                tag: `${tag}-${Date.now()}-${++notificationSequence}`,
                 icon: 'logo.png',
-                requireInteraction: true
+                requireInteraction: false
             });
             notification.onclick = () => window.focus();
+            window.setTimeout(() => notification.close(), 5000);
         }
 
-                
+        function sendSheetChangeNotification(title, body, tag) {
+            if (!alertsEnabled || !('Notification' in window) || Notification.permission !== 'granted') return;
+            showDesktopNotification(title, body, tag);
+        }
+
         function showCreativeUpdateNotification(newData) {
-            if (!('Notification' in window)) return;
+            const currentStates = new Map();
+            for (const item of newData) {
+                let creatives = currentStates.get(item.tab);
+                if (!creatives) {
+                    creatives = new Map();
+                    currentStates.set(item.tab, creatives);
+                }
 
-            const startDate = document.getElementById('start-date').value;
-            const endDate = document.getElementById('end-date').value;
-            const notificationData = newData.filter(item => {
-                const itemDate = item.filter_date;
-                return (!startDate || itemDate >= startDate) && (!endDate || itemDate <= endDate);
-            });
-
-            const currentTabMap = new Map();
-            for (const item of notificationData) {
-                if (!currentTabMap.has(item.tab)) currentTabMap.set(item.tab, []);
-                currentTabMap.get(item.tab).push(item);
+                const creativeName = String(item.et || '');
+                let state = creatives.get(creativeName);
+                if (!state) {
+                    state = { total: 0, done: 0, statusCounts: new Map(), dateCounts: new Map() };
+                    creatives.set(creativeName, state);
+                }
+                state.total++;
+                if (item.is_done) state.done++;
+                const status = String(item.status || 'PENDING/BLANK');
+                state.statusCounts.set(status, (state.statusCounts.get(status) || 0) + 1);
+                const date = String(item.filter_date || item.date || '');
+                state.dateCounts.set(date, (state.dateCounts.get(date) || 0) + 1);
             }
 
-            if (!window.lastNotificationDataMap) {
-                window.lastNotificationDataMap = currentTabMap;
+            if (!lastCreativeStates) {
+                lastCreativeStates = currentStates;
                 return;
             }
 
-            const newlyAddedByTab = new Map();
-            const uncompletedByTab = new Map();
-            const completedTabs = [];
+            const tabs = new Set([...lastCreativeStates.keys(), ...currentStates.keys()]);
+            for (const tab of tabs) {
+                const previousCreatives = lastCreativeStates.get(tab) || new Map();
+                const currentCreatives = currentStates.get(tab) || new Map();
+                const creativeNames = new Set([...previousCreatives.keys(), ...currentCreatives.keys()]);
+                const wasFullyDone = previousCreatives.size > 0
+                    && [...previousCreatives.values()].every(creative => creative.done === creative.total);
+                const isFullyDone = currentCreatives.size > 0
+                    && [...currentCreatives.values()].every(creative => creative.done === creative.total);
 
-            for (const [tab, currentItems] of currentTabMap) {
-                const previousItems = window.lastNotificationDataMap.get(tab) || [];
-                
-                const currentCounts = {};
-                const currentDoneCounts = {};
-                for (const item of currentItems) {
-                    currentCounts[item.et] = (currentCounts[item.et] || 0) + 1;
-                    if (item.is_done) currentDoneCounts[item.et] = (currentDoneCounts[item.et] || 0) + 1;
-                }
+                for (const creativeName of creativeNames) {
+                    const previous = previousCreatives.get(creativeName) || {
+                        total: 0, done: 0, statusCounts: new Map(), dateCounts: new Map()
+                    };
+                    const current = currentCreatives.get(creativeName) || {
+                        total: 0, done: 0, statusCounts: new Map(), dateCounts: new Map()
+                    };
+                    const added = Math.max(0, current.total - previous.total);
+                    const removed = Math.max(0, previous.total - current.total);
+                    const regressed = Math.max(0, previous.done - current.done - removed);
+                    const newlyDone = Math.max(0, current.done - previous.done - added);
 
-                const previousCounts = {};
-                const previousDoneCounts = {};
-                for (const item of previousItems) {
-                    previousCounts[item.et] = (previousCounts[item.et] || 0) + 1;
-                    if (item.is_done) previousDoneCounts[item.et] = (previousDoneCounts[item.et] || 0) + 1;
-                }
-
-                for (const [name, count] of Object.entries(currentCounts)) {
-                    const prevCount = previousCounts[name] || 0;
-                    if (count > prevCount) {
-                        const addedCount = count - prevCount;
-                        if (!newlyAddedByTab.has(tab)) newlyAddedByTab.set(tab, []);
-                        for (let i = 0; i < addedCount; i++) newlyAddedByTab.get(tab).push(name);
+                    if (added > 0) {
+                        sendSheetChangeNotification(
+                            `🟠 New Creative Added · ${tab}`,
+                            `Pending creative: ${creativeName} ( ${added} )`,
+                            `creative-added-${encodeURIComponent(tab)}-${encodeURIComponent(creativeName)}`
+                        );
                     }
-                    
-                    const prevDone = previousDoneCounts[name] || 0;
-                    const currDone = currentDoneCounts[name] || 0;
-                    if (currDone < prevDone) {
-                        const undoneCount = prevDone - currDone;
-                        if (!uncompletedByTab.has(tab)) uncompletedByTab.set(tab, []);
-                        for (let i = 0; i < undoneCount; i++) uncompletedByTab.get(tab).push(name);
+                    if (regressed > 0) {
+                        const creativeKey = `${tab}|||${creativeName}`;
+                        removedDoneCountsByCreative.set(
+                            creativeKey,
+                            (removedDoneCountsByCreative.get(creativeKey) || 0) + regressed
+                        );
+                        sendSheetChangeNotification(
+                            '⚠️ DONE Status Removed',
+                            `ET: ${tab}\n${creativeName} ( ${regressed} )`,
+                            `creative-done-removed-${encodeURIComponent(tab)}-${encodeURIComponent(creativeName)}`
+                        );
+                    }
+                    if (newlyDone > 0) {
+                        const creativeKey = `${tab}|||${creativeName}`;
+                        const removedDoneCount = removedDoneCountsByCreative.get(creativeKey) || 0;
+                        const redone = Math.min(newlyDone, removedDoneCount);
+                        if (redone > 0) {
+                            sendSheetChangeNotification(
+                                '✅ Creative Re-Done',
+                                `ET: ${tab}\n${creativeName} ( ${redone} )`,
+                                `creative-redone-${encodeURIComponent(tab)}-${encodeURIComponent(creativeName)}`
+                            );
+                            removedDoneCountsByCreative.set(creativeKey, removedDoneCount - redone);
+                        }
+                    }
+                    if (removed > 0) {
+                        sendSheetChangeNotification(
+                            'Creative Removed',
+                            `ET: ${tab}\n${creativeName} ( ${removed} )`,
+                            `creative-removed-${encodeURIComponent(tab)}-${encodeURIComponent(creativeName)}`
+                        );
+                    }
+
+                    if (previous.total === current.total && previous.done === current.done) {
+                        const statusDiff = getCountChanges(previous.statusCounts, current.statusCounts);
+                        if (statusDiff.count > 0) {
+                            sendSheetChangeNotification(
+                                'Creative Status Updated',
+                                `ET: ${tab}\n${creativeName}: ${statusDiff.from.join(', ')} -> ${statusDiff.to.join(', ')} ( ${statusDiff.count} )`,
+                                `creative-status-updated-${encodeURIComponent(tab)}-${encodeURIComponent(creativeName)}`
+                            );
+                        }
+
+                        const dateDiff = getCountChanges(previous.dateCounts, current.dateCounts);
+                        if (dateDiff.count > 0) {
+                            sendSheetChangeNotification(
+                                'Creative Date Updated',
+                                `ET: ${tab}\n${creativeName}: ${dateDiff.from.join(', ')} -> ${dateDiff.to.join(', ')} ( ${dateDiff.count} )`,
+                                `creative-date-updated-${encodeURIComponent(tab)}-${encodeURIComponent(creativeName)}`
+                            );
+                        }
                     }
                 }
 
-                const prevPending = previousItems.some(item => !item.is_done);
-                const currPending = currentItems.some(item => !item.is_done);
-                const currHasItems = currentItems.length > 0;
-                if (prevPending && !currPending && currHasItems) {
-                    completedTabs.push(tab);
+                if (!wasFullyDone && isFullyDone) {
+                    sendSheetChangeNotification(
+                        `✅ Completed ET: ${tab}`,
+                        'All creatives are done.',
+                        `creative-uploadings-done-${encodeURIComponent(tab)}`
+                    );
                 }
             }
 
-            window.lastNotificationDataMap = currentTabMap;
-            
-            flushQueuedNotifications(completedTabs, newlyAddedByTab, uncompletedByTab);
+            lastCreativeStates = currentStates;
         }
 
-        function flushQueuedNotifications(completedTabs = [], newlyAddedByTab = new Map(), uncompletedByTab = new Map()) {
-            if (!('Notification' in window) || Notification.permission !== 'granted' || localStorage.getItem('appAlertsEnabled') === 'false') return;
+        function getCountChanges(previousCounts, currentCounts) {
+            const names = new Set([...previousCounts.keys(), ...currentCounts.keys()]);
+            const from = [];
+            const to = [];
+            let fromCount = 0;
+            let toCount = 0;
 
-            // Helper to count and format creative names
-            const formatCreativeCounts = (creatives) => {
-                const counts = {};
-                for (const c of creatives) counts[c] = (counts[c] || 0) + 1;
-                return Object.entries(counts).map(([name, count]) => count > 1 ? `${name} ( ${count} )` : name).join(', ');
-            };
-
-            // 1. Grouped Added Creatives
-            for (const [tab, creatives] of newlyAddedByTab) {
-                const formattedList = formatCreativeCounts(creatives);
-                
-                showDesktopNotification(
-                    `✨ New Creative(s) Added`,
-                    `ET: ${tab}\nPending creative: ${formattedList}`,
-                    `creative-added-${encodeURIComponent(tab)}-${Date.now()}`
-                );
+            for (const name of names) {
+                const previousCount = previousCounts.get(name) || 0;
+                const currentCount = currentCounts.get(name) || 0;
+                if (previousCount > currentCount) {
+                    from.push(name);
+                    fromCount += previousCount - currentCount;
+                } else if (currentCount > previousCount) {
+                    to.push(name);
+                    toCount += currentCount - previousCount;
+                }
             }
 
-            // 2. Uncompleted (Done status removed)
-            for (const [tab, creatives] of uncompletedByTab) {
-                const formattedList = formatCreativeCounts(creatives);
-                showDesktopNotification(
-                    `⚠️ DONE Status Removed`,
-                    `ET: ${tab}\nCreative(s): ${formattedList}`,
-                    `creative-undone-${encodeURIComponent(tab)}-${Date.now()}`
-                );
-            }
-
-            // 3. Completed Tabs (Fully done)
-            for (const tab of completedTabs) {
-                showDesktopNotification(
-                    `✅ Completed ET: ${tab}`,
-                    `All creatives are done.`,
-                    `creative-uploadings-done-${encodeURIComponent(tab)}-${Date.now()}`
-                );
-            }
+            return { from, to, count: Math.min(fromCount, toCount) };
         }
 
         const backToTopButton = document.getElementById('back-to-top');
@@ -469,7 +683,40 @@
         document.addEventListener('click', event => {
             if (!event.target.closest('#global-creative-finder')) closeCreativeSuggestions();
         });
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/service-worker.js').catch(error => {
+                console.error('Service worker registration failed:', error);
+            });
+        }
+
+        window.addEventListener('beforeinstallprompt', (event) => {
+            event.preventDefault();
+            deferredInstallPrompt = event;
+            showInstallBanner();
+        });
+
+        window.addEventListener('appinstalled', () => {
+            deferredInstallPrompt = null;
+            hideInstallBanner();
+            showNotificationToast('App installed', 'Open the app from your home screen anytime.', 'success');
+        });
+
+        document.getElementById('install-app-btn').addEventListener('click', installApp);
+        document.getElementById('dismiss-install-btn').addEventListener('click', hideInstallBanner);
+
+        alertsEnabled = 'Notification' in window
+            && Notification.permission === 'granted';
         updateNotificationButton();
+        document.getElementById('keep-alerts-btn').addEventListener('click', closeMuteAlertsDialog);
+        document.getElementById('mute-alerts-btn').addEventListener('click', muteDesktopNotifications);
+        document.getElementById('mute-alerts-dialog').addEventListener('click', event => {
+            if (event.target.id === 'mute-alerts-dialog') closeMuteAlertsDialog();
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && !document.getElementById('mute-alerts-dialog').classList.contains('hidden')) {
+                closeMuteAlertsDialog();
+            }
+        });
         window.addEventListener('focus', updateNotificationButton);
         window.addEventListener('focus', () => {
             updateDateRangeForNewDay();

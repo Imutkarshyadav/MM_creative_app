@@ -1,9 +1,8 @@
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, send_from_directory
 import urllib.request
 import json
 import time
 import io
-import gzip
 from datetime import date, datetime
 import os
 import random
@@ -11,17 +10,6 @@ import random
 from python_calamine import CalamineWorkbook
 
 app = Flask(__name__)
-
-@app.after_request
-def compress_json_response(response):
-    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "").lower()
-    if response.mimetype != "application/json" or response.status_code >= 300 or not accepts_gzip:
-        return response
-
-    response.set_data(gzip.compress(response.get_data()))
-    response.headers["Content-Encoding"] = "gzip"
-    response.vary.add("Accept-Encoding")
-    return response
 
 SHEET_ID = "128O1hciqdQ2eClfQ6O0m_klXecO6d8hsNvXSCMoXQMI"
 URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx"
