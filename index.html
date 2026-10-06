@@ -1527,7 +1527,8 @@
                 // Fetch all data regardless of date so we can filter instantly on the frontend
                 const syncHeaders = {
                     'X-Alert-Start-Date': document.getElementById('start-date').value,
-                    'X-Alert-End-Date': document.getElementById('end-date').value
+                    'X-Alert-End-Date': document.getElementById('end-date').value,
+                    'X-Local-Date': getLocalDateValue()
                 };
                 if (pushSubscriptionEndpoint) {
                     syncHeaders['X-Push-Endpoint'] = pushSubscriptionEndpoint;

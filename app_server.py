@@ -22,9 +22,21 @@ HISTORY_FILE = 'creative_history.json'
 cache = {
     "timestamp": 0,
     "data": None,
-    "last_raw_excel": None
+    "last_raw_excel": None,
+    "local_date": None
 }
 CACHE_DURATION = 15 # Increased to 15s to prevent Google from blocking the cloud IP
+
+def get_client_local_date(headers):
+    value = headers.get("X-Local-Date", "").strip()
+    try:
+        parsed_date = datetime.strptime(value, '%Y-%m-%d').date()
+        if parsed_date.isoformat() == value:
+            return parsed_date
+    except ValueError:
+        pass
+    return datetime.now().date()
+
 
 def load_history():
     if os.path.exists(HISTORY_FILE):
@@ -41,7 +53,12 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
         if self.path.startswith('/api/sync'):
             try:
                 current_time = time.time()
-                if cache["data"] is not None and (current_time - cache["timestamp"] < CACHE_DURATION):
+                client_today = get_client_local_date(self.headers)
+                if (
+                    cache["data"] is not None
+                    and cache["local_date"] == client_today.isoformat()
+                    and current_time - cache["timestamp"] < CACHE_DURATION
+                ):
                     results = cache["data"]
                 else:
                     try:
@@ -80,6 +97,17 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
                         status_col = next((c for c in cols if 'STATUS' in str(c).upper()), None)
                         
                         if creative_col and status_col and date_col:
+                            explicit_date_rows = [
+                                row_number
+                                for row_number, (_, source_row) in enumerate(df.iterrows(), start=2)
+                                if (
+                                    pd.notna(source_row[date_col])
+                                    and str(source_row[date_col]).strip()
+                                    and pd.notna(source_row[creative_col])
+                                    and str(source_row[creative_col]).strip()
+                                )
+                            ]
+                            last_explicit_date_row = max(explicit_date_rows, default=None)
                             df[date_col] = df[date_col].ffill()
                             
                             for row_number, (_, row) in enumerate(df.iterrows(), start=2):
@@ -109,7 +137,9 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
                                 discovered_display = history[unique_key]["display_time"]
                                 raw_date = row[date_col]
                                 
-                                if pd.isna(raw_date):
+                                if row_number > (last_explicit_date_row or 1):
+                                    raw_date = client_today
+                                elif pd.isna(raw_date):
                                     continue
                                     
                                 parsed_dt = pd.to_datetime(raw_date, errors='coerce')
@@ -144,6 +174,7 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
                         
                     cache["data"] = results
                     cache["timestamp"] = current_time
+                    cache["local_date"] = client_today.isoformat()
 
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')

@@ -22,7 +22,8 @@ cache = {
     "data": None,
     "audit_events": [],
     "audit_tracking": False,
-    "last_raw_excel": None
+    "last_raw_excel": None,
+    "local_date": None
 }
 CACHE_DURATION = 5
 
@@ -138,6 +139,17 @@ def push_configuration():
             ) if not value
         ]
     }
+
+
+def get_client_local_date():
+    value = request.headers.get("X-Local-Date", "").strip()
+    try:
+        parsed_date = date.fromisoformat(value)
+        if parsed_date.isoformat() == value:
+            return parsed_date
+    except ValueError:
+        pass
+    return date.today()
 
 
 def upstash_command(*arguments):
@@ -380,7 +392,12 @@ def sync_data():
     global cache
     try:
         current_time = time.time()
-        if cache["data"] is not None and (current_time - cache["timestamp"] < CACHE_DURATION):
+        client_today = get_client_local_date()
+        if (
+            cache["data"] is not None
+            and cache["local_date"] == client_today.isoformat()
+            and current_time - cache["timestamp"] < CACHE_DURATION
+        ):
             return jsonify({
                 "success": True,
                 "data": cache["data"],
@@ -517,7 +534,7 @@ def sync_data():
 
             for row_number, raw_date, has_explicit_date, et_name, raw_status in sheet_rows:
                 if not has_explicit_date and (last_explicit_date_row is None or row_number > last_explicit_date_row):
-                    raw_date = datetime.now()
+                    raw_date = client_today
                 if raw_date is None:
                     continue
                 
@@ -589,6 +606,7 @@ def sync_data():
         cache["audit_events"] = audit_events[-1000:]
         cache["audit_tracking"] = audit_tracking
         cache["timestamp"] = current_time
+        cache["local_date"] = client_today.isoformat()
 
         return jsonify({
             "success": True,
