@@ -159,6 +159,50 @@
                     </div>
                 </div>
 
+                <section class="w-full overflow-hidden rounded-xl border border-cyan-200 bg-gradient-to-br from-cyan-50 via-white to-blue-50 shadow-sm" aria-labelledby="missing-creative-title">
+                    <div class="px-3 py-2">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex min-w-0 items-start gap-3">
+                                <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-100 text-xs text-cyan-700">
+                                    <i class="fa-solid fa-magnifying-glass-chart" aria-hidden="true"></i>
+                                </div>
+                                <h2 id="missing-creative-title" class="self-center text-sm font-black text-slate-900">Missing Creative Finder</h2>
+                            </div>
+                            <button id="missing-creative-toggle" type="button" aria-expanded="false" aria-controls="missing-creative-panel" onclick="toggleMissingCreativePanel()" class="inline-flex shrink-0 items-center gap-1 rounded-md border border-cyan-200 bg-white px-2 py-1 text-[10px] font-bold text-cyan-900 transition hover:bg-cyan-100 focus:outline-none focus:ring-2 focus:ring-cyan-100">
+                                <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                                <span>Show finder</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="missing-creative-panel" class="hidden gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.7fr)] sm:p-6">
+                        <label class="block min-w-0">
+                            <span class="mb-1.5 block text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Creative or campaign name</span>
+                            <input id="missing-creative-query" type="search" autocomplete="off" placeholder="Type a creative or campaign name..." oninput="renderMissingCreativeFinder()" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
+                        </label>
+                        <label class="block min-w-0">
+                            <span class="mb-1.5 block text-[10px] font-extrabold uppercase tracking-widest text-slate-500">ET to check</span>
+                            <select id="missing-creative-target" onchange="renderMissingCreativeFinder()" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
+                                <option value="">Sync data to choose an ET</option>
+                            </select>
+                        </label>
+                        <label class="block min-w-0 sm:col-span-2">
+                            <span class="mb-1.5 block text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Stock spreadsheet tab</span>
+                            <select id="missing-stock-tab" onchange="handleMissingStockTabChange()" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
+                                <option value="">Load stock-sheet tabs...</option>
+                            </select>
+                        </label>
+                        <div class="flex justify-end sm:col-span-2">
+                            <button type="button" onclick="clearMissingCreativeFilters()" class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-900 focus:outline-none focus:ring-4 focus:ring-cyan-100">
+                                <i class="fa-solid fa-filter-circle-xmark" aria-hidden="true"></i>
+                                Clear all filters
+                            </button>
+                        </div>
+                        <div id="missing-creative-results" class="sm:col-span-2" aria-live="polite">
+                            <p class="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">Sync the report, enter a campaign or creative, and select an ET, a stock-sheet tab, or both.</p>
+                        </div>
+                    </div>
+                </section>
+
             </div>
 
         </div>
@@ -180,7 +224,7 @@
 
     <!-- Main Content Area -->
     <main class="min-w-0 p-3 max-w-[1600px] mx-auto w-full flex-grow flex flex-col gap-4 pb-16 sm:p-8 sm:gap-8">
-        
+
         <!-- Summary Stats Grid -->
         <div class="grid grid-cols-1 gap-4 shrink-0 sm:grid-cols-2 sm:gap-8">
             <!-- Done Card -->
@@ -318,6 +362,13 @@
         let creativeVersionIndex = new Map();
         let creativeNameSuggestions = [];
         let creativeSuggestionsSuppressed = false;
+        let selectedMissingCreativeCategory = '';
+        let missingStockTabs = [];
+        let missingStockEntries = [];
+        let missingStockSheetUrl = '';
+        let missingStockError = '';
+        let missingStockLoading = false;
+        let missingStockRequest = 0;
         let expandedGroups = {}; // Keep track of which ETs are open so background sync doesn't close them
         let hasFetchedOnce = false; // Prevent loading screen from flashing repeatedly if data is empty
         let isFetchingData = false;
@@ -1372,6 +1423,7 @@
             if (/_[-a-z0-9]+(?:\.[-a-z0-9]+)+$/i.test(name.trim())) return 'Domains';
             const suffix = name.trim().slice(baseName.length).replace(/^[_\s-]+/, '');
             const tokens = suffix.split(/[_\s-]+/).filter(Boolean);
+            if (tokens.slice(-2).map(token => token.toUpperCase()).join(' ') === 'XCE CM') return 'XCE CM';
             return tokens.length ? tokens[tokens.length - 1].toUpperCase() : 'CRT_Name';
         }
 
@@ -1436,6 +1488,265 @@
             globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
             closeCreativeSuggestions();
             renderTable();
+        }
+
+        async function loadMissingStockTabs() {
+            const selector = document.getElementById('missing-stock-tab');
+            if (!selector || missingStockTabs.length) return;
+            selector.innerHTML = '<option value="">Loading stock-sheet tabs...</option>';
+            try {
+                const response = await fetch('/api/missing-stock');
+                const result = await response.json();
+                if (!response.ok || !result.success) throw new Error(result.error || `Stock sheet request failed (${response.status}).`);
+                missingStockTabs = result.tabs || [];
+                missingStockSheetUrl = result.sheet_url || '';
+                selector.innerHTML = '<option value="">Choose a stock-sheet tab...</option>' +
+                    missingStockTabs.map(tab => `<option value="${escapeHtml(tab.name)}">${escapeHtml(tab.name)} (${tab.creative_count.toLocaleString()} creatives)</option>`).join('');
+                missingStockError = '';
+                renderMissingCreativeFinder();
+            } catch (error) {
+                console.error('Could not load stock-sheet tabs:', error);
+                missingStockError = error.message;
+                selector.innerHTML = '<option value="">Stock-sheet tabs unavailable</option>';
+                renderMissingCreativeFinder();
+            }
+        }
+
+        async function handleMissingStockTabChange() {
+            const selectedTab = document.getElementById('missing-stock-tab').value;
+            const currentRequest = ++missingStockRequest;
+            missingStockEntries = [];
+            missingStockError = '';
+            if (!selectedTab) {
+                missingStockLoading = false;
+                renderMissingCreativeFinder();
+                return;
+            }
+
+            missingStockLoading = true;
+            renderMissingCreativeFinder();
+            try {
+                const response = await fetch(`/api/missing-stock?tab=${encodeURIComponent(selectedTab)}`);
+                const result = await response.json();
+                if (!response.ok || !result.success) throw new Error(result.error || `Stock tab request failed (${response.status}).`);
+                if (currentRequest !== missingStockRequest) return;
+                missingStockEntries = result.entries || [];
+                missingStockSheetUrl = result.sheet_url || missingStockSheetUrl;
+            } catch (error) {
+                if (currentRequest !== missingStockRequest) return;
+                console.error('Could not load selected stock tab:', error);
+                missingStockError = error.message;
+            } finally {
+                if (currentRequest === missingStockRequest) {
+                    missingStockLoading = false;
+                    renderMissingCreativeFinder();
+                }
+            }
+        }
+
+        function toggleMissingCreativePanel() {
+            const panel = document.getElementById('missing-creative-panel');
+            const toggle = document.getElementById('missing-creative-toggle');
+            if (!panel || !toggle) return;
+
+            const expanded = panel.classList.contains('hidden');
+            panel.classList.toggle('hidden', !expanded);
+            panel.classList.toggle('grid', expanded);
+            toggle.setAttribute('aria-expanded', String(expanded));
+            toggle.innerHTML = `<i class="fa-solid ${expanded ? 'fa-chevron-up' : 'fa-chevron-down'}" aria-hidden="true"></i><span>${expanded ? 'Hide finder' : 'Show finder'}</span>`;
+        }
+
+        function clearMissingCreativeFilters() {
+            document.getElementById('missing-creative-query').value = '';
+            document.getElementById('missing-creative-target').value = '';
+            document.getElementById('missing-stock-tab').value = '';
+            selectedMissingCreativeCategory = '';
+            handleMissingStockTabChange();
+        }
+
+        function renderMissingCreativeFinder() {
+            const queryInput = document.getElementById('missing-creative-query');
+            const targetSelect = document.getElementById('missing-creative-target');
+            const stockTabSelect = document.getElementById('missing-stock-tab');
+            const results = document.getElementById('missing-creative-results');
+            if (!queryInput || !targetSelect || !stockTabSelect || !results) return;
+
+            const selectedTarget = targetSelect.value;
+            const etNames = [...new Set(globalData.map(item => item.tab.trim()).filter(Boolean))]
+                .sort((a, b) => a.localeCompare(b));
+            targetSelect.innerHTML = '<option value="">Choose an ET...</option>' +
+                etNames.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+            if (etNames.includes(selectedTarget)) targetSelect.value = selectedTarget;
+
+            const queryText = queryInput.value.trim();
+            const query = queryText.toLocaleLowerCase();
+            const target = targetSelect.value;
+            const stockTab = stockTabSelect.value;
+            if (!query) {
+                selectedMissingCreativeCategory = '';
+                results.innerHTML = '<p class="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">Enter a campaign or creative, then select an ET, a stock-sheet tab, or both.</p>';
+                return;
+            }
+            if (!target && !stockTab) {
+                selectedMissingCreativeCategory = '';
+                results.innerHTML = '<p class="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">Choose an ET to search report data, a stock-sheet tab to search stock, or both to compare them.</p>';
+                return;
+            }
+            if (target && !globalData.length) {
+                results.innerHTML = '<p class="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">Sync the report to search the selected ET.</p>';
+                return;
+            }
+            if (stockTab && missingStockError) {
+                results.innerHTML = `<p class="rounded-xl border border-red-200 bg-red-50 px-4 py-4 text-sm font-semibold text-red-800">${escapeHtml(missingStockError)}</p>`;
+                return;
+            }
+            if (stockTab && missingStockLoading) {
+                results.innerHTML = '<p class="rounded-xl border border-cyan-100 bg-white/70 px-4 py-5 text-center text-sm text-slate-500"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Loading creatives from the selected stock tab...</p>';
+                return;
+            }
+            if (stockTab && !missingStockTabs.length) {
+                results.innerHTML = '<p class="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">Sync the report to load its ETs and the linked stock-sheet tabs.</p>';
+                return;
+            }
+
+            const matchingEntries = stockTab ? missingStockEntries.filter(entry => {
+                    const searchable = [
+                        entry.campaign,
+                        entry.campaign_code,
+                        ...(entry.campaign_aliases || []),
+                        entry.creative
+                    ].join(' ').toLocaleLowerCase();
+                    return searchable.includes(query);
+                }) : [];
+            const stockByCreative = new Map();
+            for (const entry of matchingEntries) {
+                const normalizedName = entry.creative.trim().toLocaleLowerCase();
+                let stockItem = stockByCreative.get(normalizedName);
+                if (!stockItem) {
+                    stockItem = {
+                        name: entry.creative.trim(),
+                        campaign: entry.campaign,
+                        campaignCode: entry.campaign_code || '',
+                        locations: []
+                    };
+                    stockByCreative.set(normalizedName, stockItem);
+                }
+                stockItem.locations.push(entry);
+            }
+            const stockCreatives = [...stockByCreative.values()];
+            const targetKey = target.trim().toLocaleLowerCase();
+            const itemsInTarget = new Set(globalData
+                .filter(item => target && item.tab.trim().toLocaleLowerCase() === targetKey)
+                .map(item => item.et.trim().toLocaleLowerCase()));
+            const etByCreative = new Map();
+            if (target && !stockTab) {
+                for (const entry of globalData) {
+                    const name = entry.et.trim();
+                    if (!name.toLocaleLowerCase().includes(query)) continue;
+                    const key = name.toLocaleLowerCase();
+                    if (itemsInTarget.has(key)) continue;
+                    let etItem = etByCreative.get(key);
+                    if (!etItem) {
+                        etItem = { name, sources: new Set() };
+                        etByCreative.set(key, etItem);
+                    }
+                    etItem.sources.add(entry.tab.trim());
+                }
+            }
+            const etCreatives = [...etByCreative.values()];
+            const bothSources = Boolean(target && stockTab);
+            const displayCreatives = stockTab
+                ? stockCreatives.sort((a, b) => a.name.localeCompare(b.name))
+                : etCreatives.sort((a, b) => a.name.localeCompare(b.name));
+            if (!displayCreatives.length) {
+                selectedMissingCreativeCategory = '';
+                const message = bothSources
+                    ? `No stock creatives matching “${escapeHtml(queryText)}” were found in the ${escapeHtml(stockTab)} tab.`
+                    : stockTab
+                        ? `No creatives matching “${escapeHtml(queryText)}” were found in the ${escapeHtml(stockTab)} stock tab.`
+                        : `No matching creatives are missing from ET ${escapeHtml(target)}.`;
+                results.innerHTML = `<p class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-5 text-center text-sm font-semibold text-amber-800">${message}</p>`;
+                return;
+            }
+
+            const normalizedQuery = query.replace(/[_\s-]+$/, '');
+            const categoryFor = item => {
+                const baseName = item.campaignCode || normalizedQuery;
+                return getCreativeVersionType(item.name, baseName);
+            };
+            const categoryCounts = new Map();
+            for (const item of displayCreatives) {
+                const category = categoryFor(item);
+                categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+            }
+            const categories = [...categoryCounts.keys()].sort((a, b) =>
+                categoryCounts.get(b) - categoryCounts.get(a) || a.localeCompare(b)
+            );
+            if (!categories.includes(selectedMissingCreativeCategory)) selectedMissingCreativeCategory = '';
+            const visibleCreatives = selectedMissingCreativeCategory
+                ? displayCreatives.filter(item => categoryFor(item) === selectedMissingCreativeCategory)
+                : displayCreatives;
+            const categoryButton = (category, count, active) => `
+                <button type="button" aria-pressed="${active}" onclick="selectMissingCreativeCategory('${category === 'ALL' ? '' : btoa(unescape(encodeURIComponent(category)))}')" class="max-w-full break-all rounded-md border px-2 py-1 text-[10px] font-bold transition ${active ? 'border-cyan-700 bg-cyan-700 text-white' : 'border-cyan-200 bg-white text-cyan-900 hover:bg-cyan-50'}">
+                    ${category === 'ALL' ? 'All Versions' : escapeHtml(category)} <span class="${active ? 'text-cyan-100' : 'text-slate-400'}">${count}</span>
+                </button>`;
+            const resultTitle = bothSources
+                ? `${visibleCreatives.length} stock creative${visibleCreatives.length === 1 ? '' : 's'} to compare with ET ${escapeHtml(target)}`
+                : stockTab
+                    ? `${visibleCreatives.length} stock creative${visibleCreatives.length === 1 ? '' : 's'} in ${escapeHtml(stockTab)}`
+                    : `${visibleCreatives.length} creative${visibleCreatives.length === 1 ? '' : 's'} missing from ET ${escapeHtml(target)}`;
+            const etOnly = Boolean(target && !stockTab);
+            results.innerHTML = `
+                <div class="mb-3 rounded-xl border border-cyan-100 bg-white/70 p-3">
+                    <p class="mb-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Auto-detected creative suffixes</p>
+                    <div class="flex max-h-28 flex-wrap gap-2 overflow-y-auto" aria-label="Filter creatives by suffix">
+                    ${categoryButton('ALL', displayCreatives.length, !selectedMissingCreativeCategory)}
+                    ${categories.map(category => categoryButton(
+                        category,
+                        categoryCounts.get(category),
+                        selectedMissingCreativeCategory === category
+                    )).join('')}
+                    </div>
+                </div>
+                <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h3 class="text-sm font-extrabold text-slate-800">${resultTitle} for ${escapeHtml(queryText)}</h3>
+                    ${stockTab ? `<a href="${escapeHtml(missingStockSheetUrl)}" target="_blank" rel="noopener noreferrer" class="text-[11px] font-bold text-cyan-800 underline decoration-cyan-300 underline-offset-2 hover:text-cyan-950">Open stock spreadsheet</a>` : ''}
+                </div>
+                <div class="overflow-hidden rounded-xl border border-cyan-100 bg-white">
+                    <div class="grid grid-cols-1 gap-1 border-b border-cyan-100 bg-cyan-50/70 px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-500 ${bothSources ? 'sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.2fr)_auto]' : etOnly ? 'sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.2fr)]' : 'sm:grid-cols-[minmax(0,1fr)_auto_auto]'} sm:gap-4">
+                        <span>Creative name</span>
+                        ${stockTab ? '<span>Stock</span>' : ''}
+                        ${bothSources ? '<span>ET availability</span>' : etOnly ? '<span>Status</span>' : ''}
+                        ${stockTab ? '<span>Source</span>' : ''}
+                        ${etOnly ? '<span>Found in other ETs</span>' : ''}
+                    </div>
+                    <ul class="divide-y divide-slate-100">
+                        ${visibleCreatives.map(item => {
+                            const inTarget = target ? itemsInTarget.has(item.name.toLocaleLowerCase()) : false;
+                            const statusClass = inTarget ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-cyan-200 bg-cyan-50 text-cyan-900';
+                            const stockLocation = stockTab && item.locations ? item.locations[0] : null;
+                            const sheetLink = stockLocation
+                                ? `${missingStockSheetUrl}#gid=${stockLocation.gid}&range=${encodeURIComponent(stockLocation.cell)}`
+                                : '';
+                            return `<li class="grid grid-cols-1 gap-1 px-4 py-3 ${bothSources ? 'sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.2fr)_auto]' : etOnly ? 'sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.2fr)]' : 'sm:grid-cols-[minmax(0,1fr)_auto_auto]'} sm:items-center sm:gap-4">
+                            <span class="break-all text-sm font-bold text-slate-800">${escapeHtml(item.name)}</span>
+                            ${stockTab ? `<span class="w-fit rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-700">${item.locations.length} in stock</span>` : ''}
+                            ${bothSources
+                                ? `<span class="w-fit rounded-full border px-2.5 py-1 text-[10px] font-bold ${statusClass}">${inTarget ? 'Already in selected ET' : 'Available to use in selected ET'}</span>`
+                                : etOnly ? '<span class="w-fit rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-800">Missing from selected ET</span>' : ''}
+                            ${stockTab ? `<a href="${escapeHtml(sheetLink)}" target="_blank" rel="noopener noreferrer" class="w-fit text-[11px] font-bold text-blue-700 underline decoration-blue-200 underline-offset-2 hover:text-blue-900">Open in ${escapeHtml(stockTab)}</a>` : ''}
+                            ${etOnly ? `<span class="flex max-h-20 flex-wrap gap-1 overflow-y-auto" aria-label="Also available in other ETs">${[...item.sources].sort((a, b) => a.localeCompare(b)).map(sourceEt => `<span title="Also available in ${escapeHtml(sourceEt)}" class="inline-flex max-w-full items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-bold text-indigo-800"><span class="mr-1 text-indigo-400">ET</span><span class="break-all">${escapeHtml(sourceEt)}</span></span>`).join('')}</span>` : ''}
+                        </li>`;
+                        }).join('')}
+                    </ul>
+                </div>`;
+        }
+
+        function selectMissingCreativeCategory(encodedCategory) {
+            selectedMissingCreativeCategory = encodedCategory
+                ? decodeURIComponent(escape(atob(encodedCategory)))
+                : '';
+            renderMissingCreativeFinder();
         }
 
         function openCreativeVersions(encodedName) {
@@ -1539,12 +1850,14 @@
                 if (!result.success) throw new Error(result.error);
                 
                 const newData = result.data;
+                const isDataChanged = JSON.stringify(globalData) !== JSON.stringify(newData);
+                if (isDataChanged) globalData = newData;
+                renderMissingCreativeFinder();
+                loadMissingStockTabs();
                 const freshAuditEventCount = result.audit_tracking
                     ? processAuditEvents(result.audit_events)
                     : 0;
-                const isDataChanged = JSON.stringify(globalData) !== JSON.stringify(newData);
                 if (isDataChanged) {
-                    globalData = newData;
                     rebuildCreativeVersionIndex();
                     showCreativeUpdateNotification(newData, freshAuditEventCount > 0);
                 }

@@ -7,6 +7,7 @@ import hashlib
 from datetime import date, datetime
 import os
 import random
+import re
 from urllib.parse import urlparse
 
 from python_calamine import CalamineWorkbook
@@ -15,6 +16,8 @@ app = Flask(__name__)
 
 SHEET_ID = "128O1hciqdQ2eClfQ6O0m_klXecO6d8hsNvXSCMoXQMI"
 URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx"
+MISSING_STOCK_SHEET_ID = "108x7r9upB9CzexlHu91GkIBuN4x3Y4snrUV3GXrXY7c"
+MISSING_STOCK_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{MISSING_STOCK_SHEET_ID}/edit"
 HISTORY_FILE = '/tmp/creative_history.json'
 
 cache = {
@@ -26,6 +29,11 @@ cache = {
     "local_date": None
 }
 CACHE_DURATION = 5
+MISSING_STOCK_CACHE_DURATION = 300
+missing_stock_cache = {"timestamp": 0, "tabs": [], "entries": {}}
+SHEET_GID_PATTERN = re.compile(
+    r'\[(\d+),0,\\"(\d+)\\",\[\{\\"1\\":\[\[0,0,\\"([^\\"]+)\\"'
+)
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AUDIT_SHEET_NAME = "Creative Change Audit"
@@ -38,6 +46,196 @@ push_check_cache = {"checked_at": 0}
 @app.route("/api/push/config", methods=["GET"])
 def get_push_config():
     return jsonify(push_configuration())
+
+
+def spreadsheet_column_name(column_index):
+    column = column_index + 1
+    name = ""
+    while column:
+        column, remainder = divmod(column - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def cell_text(value):
+    return str(value).strip() if value is not None else ""
+
+
+def is_stock_creative(value):
+    if value is None or isinstance(value, (date, datetime)):
+        return False
+    text = cell_text(value)
+    if not text or re.fullmatch(r"\d{4}-\d{2}-\d{2}|\d{1,2}[-/ ][A-Za-z]{3}[-/ ]\d{4}", text):
+        return False
+    if re.search(r"\((?:[^)]*(?:JSG|MET|STACK)\s*\d*[^)]*)\)\s*$", text, re.IGNORECASE):
+        return False
+    return True
+
+
+def parse_stock_sheet(sheet_name, rows, gid):
+    entries = []
+    campaign_aliases = {}
+    header_row_index = 0
+    campaign_name_column = None
+
+    for row_index, row in enumerate(rows):
+        marker_column = next(
+            (index for index, value in enumerate(row) if cell_text(value).casefold() == "campaign name"),
+            None
+        )
+        if marker_column is not None:
+            header_row_index = row_index + 1
+            campaign_name_column = marker_column
+            break
+
+    if campaign_name_column is not None:
+        for row in rows[header_row_index:]:
+            if campaign_name_column >= len(row):
+                continue
+            campaign_name = cell_text(row[campaign_name_column])
+            match = re.search(r"\(([^()]+)\)\s*$", campaign_name)
+            if campaign_name and match:
+                campaign_aliases[match.group(1).strip().casefold()] = campaign_name
+
+    if sheet_name.strip().casefold() == "campaigns list":
+        if not rows:
+            return entries
+        headers = [cell_text(value).casefold() for value in rows[0]]
+        campaign_index = next((i for i, value in enumerate(headers) if value == "campaign name"), None)
+        creative_index = next((i for i, value in enumerate(headers) if "creative" in value or "code" in value), None)
+        if campaign_index is None or creative_index is None:
+            raise ValueError("The CAMPAIGNS LIST tab is missing campaign or creative columns.")
+        for row_index, row in enumerate(rows[1:], start=1):
+            if campaign_index >= len(row) or creative_index >= len(row):
+                continue
+            campaign = cell_text(row[campaign_index])
+            creative_value = row[creative_index]
+            creative = cell_text(creative_value)
+            if not campaign or not is_stock_creative(creative_value):
+                continue
+            cell = f"{spreadsheet_column_name(creative_index)}{row_index + 1}"
+            entries.append({
+                "campaign": campaign,
+                "campaign_code": "",
+                "creative": creative,
+                "row": row_index + 1,
+                "column": creative_index,
+                "cell": cell,
+                "gid": gid
+            })
+        return entries
+
+    if header_row_index >= len(rows):
+        return entries
+
+    headers = rows[header_row_index]
+    end_column = campaign_name_column if campaign_name_column is not None else len(headers)
+    for column_index, header_value in enumerate(headers[:end_column]):
+        campaign = cell_text(header_value)
+        if not campaign:
+            continue
+        code_match = re.match(r"^([^\s(]+)", campaign)
+        campaign_code = code_match.group(1).strip() if code_match else campaign
+        aliases = [
+            campaign,
+            campaign_code,
+            campaign_aliases.get(campaign_code.casefold(), "")
+        ]
+        for row_index in range(header_row_index + 1, len(rows)):
+            row = rows[row_index]
+            if column_index >= len(row):
+                continue
+            creative_value = row[column_index]
+            creative = cell_text(creative_value)
+            if not is_stock_creative(creative_value):
+                continue
+            cell = f"{spreadsheet_column_name(column_index)}{row_index + 1}"
+            entries.append({
+                "campaign": campaign,
+                "campaign_aliases": [alias for alias in aliases if alias],
+                "campaign_code": campaign_code,
+                "creative": creative,
+                "row": row_index + 1,
+                "column": column_index,
+                "cell": cell,
+                "gid": gid
+            })
+    return entries
+
+
+def load_missing_stock():
+    current_time = time.time()
+    if (
+        missing_stock_cache["tabs"]
+        and current_time - missing_stock_cache["timestamp"] < MISSING_STOCK_CACHE_DURATION
+    ):
+        return missing_stock_cache
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    workbook_request = urllib.request.Request(
+        f"https://docs.google.com/spreadsheets/d/{MISSING_STOCK_SHEET_ID}/export?format=xlsx",
+        headers=headers
+    )
+    with urllib.request.urlopen(workbook_request, timeout=8) as response:
+        workbook_data = response.read()
+    if not workbook_data.startswith(b"PK"):
+        raise RuntimeError("The linked stock spreadsheet did not return an Excel workbook.")
+    workbook = CalamineWorkbook.from_filelike(io.BytesIO(workbook_data))
+
+    metadata_request = urllib.request.Request(
+        f"{MISSING_STOCK_SHEET_URL}?usp=sharing",
+        headers=headers
+    )
+    with urllib.request.urlopen(metadata_request, timeout=8) as response:
+        spreadsheet_html = response.read().decode("utf-8", "replace")
+    gids = {
+        name: gid
+        for _, gid, name in SHEET_GID_PATTERN.findall(spreadsheet_html)
+    }
+    if any(name not in gids for name in workbook.sheet_names):
+        raise RuntimeError("Could not map all stock spreadsheet tabs to their links.")
+
+    entries_by_tab = {}
+    tabs = []
+    for sheet_name in workbook.sheet_names:
+        rows = workbook.get_sheet_by_name(sheet_name).to_python()
+        entries = parse_stock_sheet(sheet_name, rows, gids[sheet_name])
+        entries_by_tab[sheet_name] = entries
+        tabs.append({"name": sheet_name, "creative_count": len(entries)})
+
+    missing_stock_cache.update({
+        "timestamp": current_time,
+        "tabs": tabs,
+        "entries": entries_by_tab
+    })
+    return missing_stock_cache
+
+
+@app.route("/api/missing-stock", methods=["GET"])
+def get_missing_stock():
+    try:
+        stock = load_missing_stock()
+        tab_name = request.args.get("tab", "").strip()
+        if not tab_name:
+            return jsonify({
+                "success": True,
+                "sheet_url": MISSING_STOCK_SHEET_URL,
+                "tabs": stock["tabs"]
+            })
+        if tab_name not in stock["entries"]:
+            return jsonify({"success": False, "error": "The selected stock tab was not found."}), 404
+        return jsonify({
+            "success": True,
+            "tab": tab_name,
+            "sheet_url": MISSING_STOCK_SHEET_URL,
+            "entries": stock["entries"][tab_name]
+        })
+    except Exception as error:
+        print(f"Could not load missing-creative stock sheet: {error}")
+        return jsonify({
+            "success": False,
+            "error": "Could not load the linked stock spreadsheet. Check that it is shared for viewing and try again."
+        }), 503
 
 
 def is_allowed_push_endpoint(endpoint):

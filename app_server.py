@@ -9,6 +9,7 @@ import io
 from datetime import datetime
 import os
 import warnings
+from api.index import load_missing_stock, MISSING_STOCK_SHEET_URL
 
 # Prevent openpyxl warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
@@ -50,6 +51,44 @@ def save_history(history):
 
 class SyncHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
+        parsed_path = urllib.parse.urlsplit(self.path)
+        if parsed_path.path == '/api/missing-stock':
+            try:
+                stock = load_missing_stock()
+                tab_name = urllib.parse.parse_qs(parsed_path.query).get('tab', [''])[0].strip()
+                if tab_name and tab_name not in stock['entries']:
+                    status_code = 404
+                    payload = {"success": False, "error": "The selected stock tab was not found."}
+                elif tab_name:
+                    status_code = 200
+                    payload = {
+                        "success": True,
+                        "tab": tab_name,
+                        "sheet_url": MISSING_STOCK_SHEET_URL,
+                        "entries": stock['entries'][tab_name]
+                    }
+                else:
+                    status_code = 200
+                    payload = {
+                        "success": True,
+                        "sheet_url": MISSING_STOCK_SHEET_URL,
+                        "tabs": stock['tabs']
+                    }
+            except Exception as error:
+                print(f"Could not load missing-creative stock sheet: {error}")
+                status_code = 503
+                payload = {
+                    "success": False,
+                    "error": "Could not load the linked stock spreadsheet. Check that it is shared for viewing and try again."
+                }
+            response = json.dumps(payload).encode('utf-8')
+            self.send_response(status_code)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+            return
+
         if self.path.startswith('/api/sync'):
             try:
                 current_time = time.time()
