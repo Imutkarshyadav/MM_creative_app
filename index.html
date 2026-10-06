@@ -19,6 +19,7 @@
     
     <style>
         body { font-family: 'Inter', sans-serif; }
+        html, body { max-width: 100%; }
         #notification-toast-progress {
             transition: width 3200ms linear;
         }
@@ -29,6 +30,21 @@
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
         @media (max-width: 640px) {
+            #header-actions {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto auto auto;
+                justify-content: stretch;
+            }
+
+            #status-badge {
+                grid-column: 1;
+            }
+
+            #sync-btn {
+                grid-column: 1 / -1;
+                justify-content: center;
+            }
+
             #notification-btn {
                 min-width: 0;
                 padding-left: 0.8rem;
@@ -44,7 +60,7 @@
             }
 
             #sync-btn {
-                min-width: 110px;
+                min-width: 0;
             }
         }
     </style>
@@ -81,7 +97,7 @@
                 </div>
 
                 <!-- Right Side: Actions -->
-                <div class="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end sm:gap-4">
+                <div id="header-actions" class="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end sm:gap-4">
                     <!-- Status Badge -->
                     <div id="status-badge" class="flex min-w-0 items-center gap-2 bg-slate-100 text-slate-500 px-2 py-1.5 rounded-lg text-[10px] font-bold tracking-wide transition-colors sm:px-3 sm:text-xs">
                         <i class="fa-solid fa-circle text-[8px]" id="status-icon"></i>
@@ -315,12 +331,18 @@
         const GROUPED_ALERT_HISTORY_KEY = 'creative-report-grouped-alert-history-v1';
         const groupedAlertHistory = loadGroupedAlertHistory();
         const AUTO_SYNC_INTERVAL_MS = 5000;
+        const AUDIT_SEEN_EVENTS_KEY = 'creative-report-audit-seen-events-v1';
+        const auditNotificationState = loadAuditNotificationState();
         let alertsEnabled = false;
         let notificationSequence = 0;
         let deferredInstallPrompt = null;
         let lastNotificationState = 'unset';
+        let pushSetupMessageShown = false;
+        let pushSubscriptionEndpoint = '';
         const queuedNotificationToasts = [];
         let isShowingQueuedNotificationToast = false;
+        const queuedDesktopNotifications = [];
+        let isShowingQueuedDesktopNotification = false;
 
         function showNotificationToast(title, message, tone = 'info', onClick = null) {
             const toast = document.getElementById('notification-toast');
@@ -410,8 +432,8 @@
             }, 3200);
         }
 
-        function showQueuedNotificationToast(title, message, tone = 'success', etName = null) {
-            queuedNotificationToasts.push({ title, message, tone, etName });
+        function showQueuedNotificationToast(title, message, tone = 'success', etName = null, nextDelayMs = 3400) {
+            queuedNotificationToasts.push({ title, message, tone, etName, nextDelayMs });
             if (isShowingQueuedNotificationToast) return;
 
             const showNextToast = () => {
@@ -430,7 +452,7 @@
                 );
                 setTimeout(() => {
                     showNextToast();
-                }, 3400);
+                }, nextToast.nextDelayMs);
             };
 
             showNextToast();
@@ -556,6 +578,7 @@
             if (Notification.permission === 'granted') {
                 alertsEnabled = true;
                 updateNotificationButton();
+                await registerPushSubscription({ showFeedback: true });
                 return;
             }
 
@@ -563,6 +586,7 @@
                 const permission = await Notification.requestPermission();
                 if (permission === 'granted') {
                     alertsEnabled = true;
+                    await registerPushSubscription({ showFeedback: true });
                 }
                 updateNotificationButton();
             } catch (error) {
@@ -602,25 +626,140 @@
 
         function muteDesktopNotifications() {
             alertsEnabled = false;
+            removePushSubscription();
             updateNotificationButton();
             closeMuteAlertsDialog();
         }
 
-        function showDesktopNotification(title, body, tag, etName = null) {
-            const notification = new Notification(title, {
+        function decodeVapidPublicKey(encodedKey) {
+            const paddedKey = encodedKey + '='.repeat((4 - encodedKey.length % 4) % 4);
+            const rawKey = atob(paddedKey.replace(/-/g, '+').replace(/_/g, '/'));
+            return Uint8Array.from(rawKey, character => character.charCodeAt(0));
+        }
+
+        async function registerPushSubscription({ showFeedback = true } = {}) {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                if (showFeedback && !pushSetupMessageShown) {
+                    showNotificationToast(
+                        'Push is not supported here',
+                        'Use a supported browser. On iPhone, install this app from Safari’s Share menu first.',
+                        'warning'
+                    );
+                    pushSetupMessageShown = true;
+                }
+                return;
+            }
+
+            try {
+                const configResponse = await fetch('/api/push/config');
+                if (!configResponse.ok) throw new Error(`Push setup check failed (${configResponse.status}).`);
+                const config = await configResponse.json();
+                if (!config.enabled) {
+                    if (showFeedback && !pushSetupMessageShown) {
+                        showNotificationToast(
+                            'Mobile push setup needed',
+                            'Deploy with VAPID keys and Upstash Redis settings. Desktop alerts remain available.',
+                            'warning'
+                        );
+                        pushSetupMessageShown = true;
+                    }
+                    return;
+                }
+
+                const registration = await navigator.serviceWorker.ready;
+                let subscription = await registration.pushManager.getSubscription();
+                if (!subscription) {
+                    subscription = await registration.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: decodeVapidPublicKey(config.public_key)
+                    });
+                }
+
+                const saveResponse = await fetch('/api/push/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(subscription)
+                });
+                const result = await saveResponse.json();
+                if (!saveResponse.ok || !result.success) {
+                    throw new Error(result.error || `Could not register this device (${saveResponse.status}).`);
+                }
+                pushSubscriptionEndpoint = subscription.endpoint;
+                if (showFeedback) {
+                    showNotificationToast('This device is ready', 'Push notifications are enabled for this device.', 'success');
+                }
+            } catch (error) {
+                console.error('Could not register this device for push notifications:', error);
+                if (showFeedback) showNotificationToast('Push setup failed', error.message, 'error');
+            }
+        }
+
+        async function removePushSubscription() {
+            if (!('serviceWorker' in navigator)) return;
+            try {
+                const registration = await navigator.serviceWorker.ready;
+                const subscription = await registration.pushManager?.getSubscription();
+                if (!subscription) return;
+                pushSubscriptionEndpoint = '';
+                const response = await fetch('/api/push/subscribe', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ endpoint: subscription.endpoint })
+                });
+                if (!response.ok) {
+                    throw new Error(`Could not remove this device from push notifications (${response.status}).`);
+                }
+                await subscription.unsubscribe();
+            } catch (error) {
+                console.error('Could not disable push notifications on this device:', error);
+            }
+        }
+
+        async function showDesktopNotification(title, body, tag, etName = null) {
+            const options = {
                 body,
                 tag: `${tag}-${Date.now()}-${++notificationSequence}`,
-                icon: 'logo.png',
+                icon: '/logo.png',
+                badge: '/logo.png',
                 requireInteraction: false,
                 data: { etName }
-            });
-            notification.onclick = () => {
-                window.focus();
-                const etName = notification.data?.etName;
-                if (etName) openEtByName(etName);
-                notification.close();
             };
-            window.setTimeout(() => notification.close(), 5000);
+            if ('serviceWorker' in navigator) {
+                try {
+                    const registration = await navigator.serviceWorker.ready;
+                    await registration.showNotification(title, options);
+                    return;
+                } catch (error) {
+                    console.error('Service worker notification failed:', error);
+                }
+            }
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification(title, options);
+            }
+        }
+
+        function queueDesktopNotification(title, body, tag, etName = null) {
+            queuedDesktopNotifications.push({ title, body, tag, etName });
+            if (isShowingQueuedDesktopNotification) return;
+
+            const showNextNotification = () => {
+                const nextNotification = queuedDesktopNotifications.shift();
+                if (!nextNotification) {
+                    isShowingQueuedDesktopNotification = false;
+                    return;
+                }
+
+                isShowingQueuedDesktopNotification = true;
+                showDesktopNotification(
+                    nextNotification.title,
+                    nextNotification.body,
+                    nextNotification.tag,
+                    nextNotification.etName
+                );
+                window.setTimeout(showNextNotification, 5000);
+            };
+
+            showNextNotification();
         }
 
         function loadGroupedAlertHistory() {
@@ -631,6 +770,99 @@
                 console.error('Could not load grouped alert history:', error);
                 return [];
             }
+        }
+
+        function loadAuditNotificationState() {
+            try {
+                const savedState = JSON.parse(localStorage.getItem(AUDIT_SEEN_EVENTS_KEY) || 'null');
+                return {
+                    initialized: Boolean(savedState?.initialized),
+                    ids: new Set(Array.isArray(savedState?.ids) ? savedState.ids : [])
+                };
+            } catch (error) {
+                console.error('Could not load audit notification state:', error);
+                return { initialized: false, ids: new Set() };
+            }
+        }
+
+        function saveAuditNotificationState() {
+            try {
+                localStorage.setItem(AUDIT_SEEN_EVENTS_KEY, JSON.stringify({
+                    initialized: auditNotificationState.initialized,
+                    ids: [...auditNotificationState.ids].slice(-1000)
+                }));
+            } catch (error) {
+                console.error('Could not save audit notification state:', error);
+            }
+        }
+
+        function formatAuditValue(value) {
+            const text = String(value || '').trim();
+            if (!text) return '(blank)';
+            try {
+                const parsed = JSON.parse(text);
+                if (Array.isArray(parsed)) return parsed.flat(3).join(', ') || '(blank)';
+            } catch {
+                // Keep ordinary cell values as-is.
+            }
+            return text;
+        }
+
+        function processAuditEvents(events) {
+            if (!Array.isArray(events) || events.length === 0) return 0;
+
+            const freshEvents = events.filter(event => event.id && !auditNotificationState.ids.has(event.id));
+            for (const event of events) {
+                if (event.id) auditNotificationState.ids.add(event.id);
+            }
+            while (auditNotificationState.ids.size > 1000) {
+                auditNotificationState.ids.delete(auditNotificationState.ids.values().next().value);
+            }
+
+            if (!auditNotificationState.initialized) {
+                auditNotificationState.initialized = true;
+                saveAuditNotificationState();
+                return 0;
+            }
+
+            auditNotificationState.initialized = true;
+            saveAuditNotificationState();
+            if (!alertsEnabled || freshEvents.length === 0) return 0;
+
+            const groups = new Map();
+            for (const event of freshEvents) {
+                const groupName = String(event.sheet || 'Spreadsheet');
+                const groupKey = groupName;
+                if (!groups.has(groupKey)) groups.set(groupKey, { name: groupName, events: [] });
+                groups.get(groupKey).events.push(event);
+            }
+
+            for (const group of groups.values()) {
+                const visibleEvents = group.events.slice(0, 5);
+                const details = visibleEvents.map(event => {
+                    const actor = event.editor || 'Editor identity unavailable';
+                    const creative = event.et ? `Creative ${event.et} — ` : '';
+                    const column = event.column || event.range || 'Cell';
+                    const previous = formatAuditValue(event.old_value);
+                    const current = formatAuditValue(event.new_value);
+                    return `${creative}${actor}: ${column} changed ${previous} → ${current}`;
+                });
+                if (group.events.length > visibleEvents.length) {
+                    details.push(`+${group.events.length - visibleEvents.length} more edits (all are in the audit log)`);
+                }
+
+                const title = `${group.name} · ${group.events.length} edit${group.events.length === 1 ? '' : 's'}`;
+                const message = details.join('\n');
+                const tag = `audit-${encodeURIComponent(group.name)}-${Date.now()}-${++notificationSequence}`;
+                if ('Notification' in window
+                    && window.isSecureContext
+                    && Notification.permission === 'granted') {
+                    showDesktopNotification(title, message, tag, group.name);
+                } else {
+                    showQueuedNotificationToast(title, message, 'info', group.name);
+                }
+            }
+            return freshEvents.length;
         }
 
         function saveGroupedAlertHistory() {
@@ -730,7 +962,7 @@
             return states;
         }
 
-        function showCreativeUpdateNotification(newData) {
+        function showCreativeUpdateNotification(newData, suppressDuplicateNotifications = false) {
             const currentStates = new Map();
             const currentRows = new Map();
             const startDate = document.getElementById('start-date')?.value || '';
@@ -774,6 +1006,7 @@
                 endDate
             );
             const tabs = new Set([...lastCreativeStates.keys(), ...currentStates.keys()]);
+            const notificationGroups = [];
             for (const tab of tabs) {
                 const changes = [];
                 let hasAlwaysNotifyChange = false;
@@ -915,37 +1148,96 @@
                     groupedAlertHistory.length = Math.min(groupedAlertHistory.length, 100);
                     saveGroupedAlertHistory();
 
-                    if (!alertsEnabled && !hasAlwaysNotifyChange) continue;
-
                     const completionMessage = changes.some(change => change.type === 'completed');
                     const reopenedMessage = changes.some(change => change.type === 'reopened');
-                    const updateLabel = `${changes.length} update${changes.length === 1 ? '' : 's'}`;
-                    const title = completionMessage
-                        ? `✅ ET Completed: ${tab} — ${updateLabel}`
-                        : reopenedMessage
-                            ? `⚠️ ET Reopened: ${tab} — ${updateLabel}`
-                            : `${tab} — ${updateLabel}`;
-                    const visibleChanges = changes.slice(0, 4).map(change => change.detail);
-                    if (changes.length > visibleChanges.length) {
-                        visibleChanges.push(`+${changes.length - visibleChanges.length} more updates`);
+                    if ((!alertsEnabled && !hasAlwaysNotifyChange)
+                        || (suppressDuplicateNotifications && !completionMessage && !reopenedMessage)) {
+                        continue;
                     }
-                    const message = `${summary}\n${visibleChanges.join('\n')}`;
-                    const tag = `et-updates-${encodeURIComponent(tab)}`;
+
+                    notificationGroups.push({
+                        et: tab,
+                        changes,
+                        summary,
+                        completionMessage,
+                        reopenedMessage
+                    });
+                }
+            }
+
+            if (notificationGroups.length > 0) {
+                let lastCompletionIndex = -1;
+                for (let index = 0; index < notificationGroups.length; index++) {
+                    if (notificationGroups[index].completionMessage) lastCompletionIndex = index;
+                }
+
+                let pendingAlert = null;
+                if (lastCompletionIndex >= 0) {
+                    const pendingGroups = [...currentCompletionStates.entries()]
+                        .map(([etName, creatives]) => ({
+                            etName,
+                            pendingCount: [...creatives.values()]
+                                .reduce((total, creative) => total + creative.total - creative.done, 0)
+                        }))
+                        .filter(group => group.pendingCount > 0)
+                        .sort((left, right) => left.etName.localeCompare(right.etName));
+                    const totalPendingCreatives = pendingGroups
+                        .reduce((total, group) => total + group.pendingCount, 0);
+                    pendingAlert = {
+                        title: pendingGroups.length > 0
+                            ? `📋 ${pendingGroups.length} ET${pendingGroups.length === 1 ? '' : 's'} still pending`
+                            : 'Hurry 🎉 all ETs Done',
+                        message: pendingGroups.length > 0
+                            ? `Pending ETs: ${pendingGroups.length}\nPending creatives: ${totalPendingCreatives}\n\n${pendingGroups.map(group => `${group.etName} — ${group.pendingCount} pending`).join('\n')}`
+                            : 'All ETs are complete. Great work!',
+                        tag: `pending-ets-${Date.now()}-${++notificationSequence}`
+                    };
+                }
+
+                for (let index = 0; index < notificationGroups.length; index++) {
+                    const group = notificationGroups[index];
+                    const updateLabel = `${group.changes.length} update${group.changes.length === 1 ? '' : 's'}`;
+                    const title = group.completionMessage
+                        ? `✅ ET Completed: ${group.et} — ${updateLabel}`
+                        : group.reopenedMessage
+                            ? `⚠️ ET Reopened: ${group.et} — ${updateLabel}`
+                            : `${group.et} — ${updateLabel}`;
+                    const message = `${group.summary}\n${group.changes.map(change => change.detail).join('\n')}`;
+                    const tone = group.completionMessage
+                        ? 'success'
+                        : group.reopenedMessage
+                            ? 'warning'
+                            : 'info';
+                    const tag = `et-updates-${encodeURIComponent(group.et)}-${Date.now()}-${++notificationSequence}`;
+
                     if ('Notification' in window
                         && window.isSecureContext
                         && Notification.permission === 'granted') {
-                        showDesktopNotification(title, message, tag, tab);
-                    }
-                    if (completionMessage
-                        || !('Notification' in window)
-                        || !window.isSecureContext
-                        || Notification.permission !== 'granted') {
+                        queueDesktopNotification(title, message, tag, group.et);
+                    } else {
                         showQueuedNotificationToast(
                             title,
                             message,
-                            completionMessage ? 'success' : reopenedMessage ? 'warning' : 'info',
-                            tab
+                            tone,
+                            group.et,
+                            group.completionMessage && index === lastCompletionIndex ? 5000 : 3400
                         );
+                    }
+
+                    if (pendingAlert && index === lastCompletionIndex) {
+                        if ('Notification' in window
+                            && window.isSecureContext
+                            && Notification.permission === 'granted') {
+                            queueDesktopNotification(pendingAlert.title, pendingAlert.message, pendingAlert.tag);
+                        } else {
+                            showQueuedNotificationToast(
+                                pendingAlert.title,
+                                pendingAlert.message,
+                                'info',
+                                null,
+                                3400
+                            );
+                        }
                     }
                 }
             }
@@ -996,6 +1288,11 @@
             navigator.serviceWorker.register('/service-worker.js').catch(error => {
                 console.error('Service worker registration failed:', error);
             });
+            navigator.serviceWorker.addEventListener('message', event => {
+                if (event.data?.type === 'OPEN_ET_GROUP' && event.data.etName) {
+                    openEtByName(event.data.etName);
+                }
+            });
         }
 
         window.addEventListener('beforeinstallprompt', (event) => {
@@ -1014,6 +1311,7 @@
         alertsEnabled = 'Notification' in window
             && Notification.permission === 'granted';
         updateNotificationButton();
+        if (alertsEnabled) registerPushSubscription({ showFeedback: false });
         document.getElementById('keep-alerts-btn').addEventListener('click', closeMuteAlertsDialog);
         document.getElementById('mute-alerts-btn').addEventListener('click', muteDesktopNotifications);
         document.getElementById('mute-alerts-dialog').addEventListener('click', event => {
@@ -1227,17 +1525,27 @@
 
             try {
                 // Fetch all data regardless of date so we can filter instantly on the frontend
-                const response = await fetch(`/api/sync`);
+                const syncHeaders = {
+                    'X-Alert-Start-Date': document.getElementById('start-date').value,
+                    'X-Alert-End-Date': document.getElementById('end-date').value
+                };
+                if (pushSubscriptionEndpoint) {
+                    syncHeaders['X-Push-Endpoint'] = pushSubscriptionEndpoint;
+                }
+                const response = await fetch('/api/sync', { headers: syncHeaders });
                 const result = await response.json();
                 
                 if (!result.success) throw new Error(result.error);
                 
                 const newData = result.data;
+                const freshAuditEventCount = result.audit_tracking
+                    ? processAuditEvents(result.audit_events)
+                    : 0;
                 const isDataChanged = JSON.stringify(globalData) !== JSON.stringify(newData);
                 if (isDataChanged) {
                     globalData = newData;
                     rebuildCreativeVersionIndex();
-                    showCreativeUpdateNotification(newData);
+                    showCreativeUpdateNotification(newData, freshAuditEventCount > 0);
                 }
                 hasFetchedOnce = true;
                 
