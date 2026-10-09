@@ -155,25 +155,23 @@
                     </label>
                     <div id="creative-finder-results" class="hidden absolute left-0 right-0 top-full z-50 mt-2 max-h-80 overflow-y-auto rounded-xl border border-purple-200 bg-white p-2 shadow-xl">
                         <div id="creative-suggestions-panel" role="listbox" class="hidden max-h-48 overflow-y-auto"></div>
-                        <div id="creative-version-filters" aria-label="Creative version filters" class="hidden max-h-28 flex-wrap items-center gap-2 overflow-y-auto border-t border-purple-100 pt-2"></div>
+                        <div id="creative-version-filters" aria-label="Creative version filters" class="hidden max-h-28 flex flex-wrap items-center gap-2 overflow-y-auto border-t border-purple-100 pt-2"></div>
                     </div>
                 </div>
 
-                <section class="w-full overflow-hidden rounded-xl border border-cyan-200 bg-gradient-to-br from-cyan-50 via-white to-blue-50 shadow-sm" aria-labelledby="missing-creative-title">
-                    <div class="px-3 py-2">
-                        <div class="flex items-center justify-between gap-2">
-                            <div class="flex min-w-0 items-start gap-3">
-                                <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-100 text-xs text-cyan-700">
-                                    <i class="fa-solid fa-magnifying-glass-chart" aria-hidden="true"></i>
-                                </div>
-                                <h2 id="missing-creative-title" class="self-center text-sm font-black text-slate-900">Missing Creative Finder</h2>
-                            </div>
-                            <button id="missing-creative-toggle" type="button" aria-expanded="false" aria-controls="missing-creative-panel" onclick="toggleMissingCreativePanel()" class="inline-flex shrink-0 items-center gap-1 rounded-md border border-cyan-200 bg-white px-2 py-1 text-[10px] font-bold text-cyan-900 transition hover:bg-cyan-100 focus:outline-none focus:ring-2 focus:ring-cyan-100">
-                                <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
-                                <span>Show finder</span>
-                            </button>
-                        </div>
-                    </div>
+                <section id="missing-creative-section" class="w-full overflow-hidden rounded-xl border border-cyan-200 bg-gradient-to-br from-cyan-50 via-white to-blue-50 shadow-sm" aria-labelledby="missing-creative-title">
+                    <button id="missing-creative-toggle" type="button" aria-expanded="false" aria-controls="missing-creative-panel" onclick="toggleMissingCreativePanel()" class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-cyan-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400">
+                        <span class="flex min-w-0 items-center gap-3">
+                            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-100 text-xs text-cyan-700">
+                                <i class="fa-solid fa-magnifying-glass-chart" aria-hidden="true"></i>
+                            </span>
+                            <span id="missing-creative-title" class="text-sm font-black text-slate-900">Missing Creative Finder</span>
+                        </span>
+                        <span class="inline-flex shrink-0 items-center gap-1 rounded-md border border-cyan-200 bg-white px-2 py-1 text-[10px] font-bold text-cyan-900">
+                            <i id="missing-creative-toggle-icon" class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                            <span id="missing-creative-toggle-label">Show finder</span>
+                        </span>
+                    </button>
                     <div id="missing-creative-panel" class="hidden gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.7fr)] sm:p-6">
                         <label class="block min-w-0">
                             <span class="mb-1.5 block text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Creative or campaign name</span>
@@ -362,7 +360,8 @@
         let creativeVersionIndex = new Map();
         let creativeNameSuggestions = [];
         let creativeSuggestionsSuppressed = false;
-        let selectedMissingCreativeCategory = '';
+        let selectedMissingCreativeCategories = new Set();
+        let missingStockAvailabilityFilter = 'all';
         let missingStockTabs = [];
         let missingStockEntries = [];
         let missingStockSheetUrl = '';
@@ -374,7 +373,7 @@
         let isFetchingData = false;
         const GLOBAL_SEARCH_PAGE_SIZE = 200;
         let globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
-        let selectedCreativeVersion = '';
+        let selectedCreativeVersions = new Set();
         let lastCreativeStates = null;
         let lastCreativeRows = null;
         let lastCreativeData = null;
@@ -1484,7 +1483,7 @@
         function selectCreativeSuggestion(encodedName) {
             document.getElementById('creative-finder').value = decodeURIComponent(escape(atob(encodedName)));
             creativeSuggestionsSuppressed = true;
-            selectedCreativeVersion = '';
+            selectedCreativeVersions.clear();
             globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
             closeCreativeSuggestions();
             renderTable();
@@ -1544,23 +1543,32 @@
             }
         }
 
-        function toggleMissingCreativePanel() {
+        function setMissingCreativePanelExpanded(expanded) {
             const panel = document.getElementById('missing-creative-panel');
             const toggle = document.getElementById('missing-creative-toggle');
             if (!panel || !toggle) return;
 
-            const expanded = panel.classList.contains('hidden');
             panel.classList.toggle('hidden', !expanded);
             panel.classList.toggle('grid', expanded);
             toggle.setAttribute('aria-expanded', String(expanded));
-            toggle.innerHTML = `<i class="fa-solid ${expanded ? 'fa-chevron-up' : 'fa-chevron-down'}" aria-hidden="true"></i><span>${expanded ? 'Hide finder' : 'Show finder'}</span>`;
+            document.getElementById('missing-creative-toggle-icon').className = `fa-solid ${expanded ? 'fa-chevron-up' : 'fa-chevron-down'}`;
+            document.getElementById('missing-creative-toggle-label').textContent = expanded ? 'Hide finder' : 'Show finder';
+        }
+
+        function toggleMissingCreativePanel() {
+            const panel = document.getElementById('missing-creative-panel');
+            if (!panel) return;
+
+            const expanded = panel.classList.contains('hidden');
+            setMissingCreativePanelExpanded(expanded);
         }
 
         function clearMissingCreativeFilters() {
             document.getElementById('missing-creative-query').value = '';
             document.getElementById('missing-creative-target').value = '';
             document.getElementById('missing-stock-tab').value = '';
-            selectedMissingCreativeCategory = '';
+            selectedMissingCreativeCategories.clear();
+            missingStockAvailabilityFilter = 'all';
             handleMissingStockTabChange();
         }
 
@@ -1583,12 +1591,12 @@
             const target = targetSelect.value;
             const stockTab = stockTabSelect.value;
             if (!query) {
-                selectedMissingCreativeCategory = '';
+                selectedMissingCreativeCategories.clear();
                 results.innerHTML = '<p class="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">Enter a campaign or creative, then select an ET, a stock-sheet tab, or both.</p>';
                 return;
             }
             if (!target && !stockTab) {
-                selectedMissingCreativeCategory = '';
+                selectedMissingCreativeCategories.clear();
                 results.innerHTML = '<p class="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">Choose an ET to search report data, a stock-sheet tab to search stock, or both to compare them.</p>';
                 return;
             }
@@ -1634,6 +1642,10 @@
                 stockItem.locations.push(entry);
             }
             const stockCreatives = [...stockByCreative.values()];
+            const creativesInAnyEt = new Set(globalData.map(item => item.et.trim().toLocaleLowerCase()));
+            const missingFromEveryEt = stockCreatives.filter(item =>
+                !creativesInAnyEt.has(item.name.toLocaleLowerCase())
+            );
             const targetKey = target.trim().toLocaleLowerCase();
             const itemsInTarget = new Set(globalData
                 .filter(item => target && item.tab.trim().toLocaleLowerCase() === targetKey)
@@ -1655,11 +1667,27 @@
             }
             const etCreatives = [...etByCreative.values()];
             const bothSources = Boolean(target && stockTab);
-            const displayCreatives = stockTab
-                ? stockCreatives.sort((a, b) => a.name.localeCompare(b.name))
-                : etCreatives.sort((a, b) => a.name.localeCompare(b.name));
+            const matchingStockCreatives = missingStockAvailabilityFilter === 'missing'
+                ? missingFromEveryEt
+                : stockCreatives;
+            const displayCreatives = (stockTab ? matchingStockCreatives : etCreatives)
+                .sort((a, b) => a.name.localeCompare(b.name));
+            const stockAvailabilityFilters = stockTab ? `
+                <div class="mb-3 flex flex-wrap items-center gap-2" aria-label="Stock availability filters">
+                    <button type="button" aria-pressed="${missingStockAvailabilityFilter === 'all'}" onclick="selectMissingStockAvailability('all')" class="rounded-md border px-2.5 py-1.5 text-[10px] font-bold ${missingStockAvailabilityFilter === 'all' ? 'border-cyan-700 bg-cyan-700 text-white' : 'border-cyan-200 bg-white text-cyan-900 hover:bg-cyan-50'}">
+                        All stock <span class="${missingStockAvailabilityFilter === 'all' ? 'text-cyan-100' : 'text-slate-400'}">${stockCreatives.length}</span>
+                    </button>
+                    <button type="button" aria-pressed="${missingStockAvailabilityFilter === 'missing'}" onclick="selectMissingStockAvailability('missing')" class="rounded-md border px-2.5 py-1.5 text-[10px] font-bold ${missingStockAvailabilityFilter === 'missing' ? 'border-cyan-700 bg-cyan-700 text-white' : 'border-cyan-200 bg-white text-cyan-900 hover:bg-cyan-50'}">
+                        Missing from every ET <span class="${missingStockAvailabilityFilter === 'missing' ? 'text-cyan-100' : 'text-slate-400'}">${missingFromEveryEt.length}</span>
+                    </button>
+                </div>` : '';
             if (!displayCreatives.length) {
-                selectedMissingCreativeCategory = '';
+                selectedMissingCreativeCategories.clear();
+                if (stockTab && missingStockAvailabilityFilter === 'missing' && stockCreatives.length) {
+                    results.innerHTML = `${stockAvailabilityFilters}
+                        <p class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-5 text-center text-sm font-semibold text-emerald-800">All matching stock creatives are already listed in an ET.</p>`;
+                    return;
+                }
                 const message = bothSources
                     ? `No stock creatives matching “${escapeHtml(queryText)}” were found in the ${escapeHtml(stockTab)} tab.`
                     : stockTab
@@ -1682,9 +1710,11 @@
             const categories = [...categoryCounts.keys()].sort((a, b) =>
                 categoryCounts.get(b) - categoryCounts.get(a) || a.localeCompare(b)
             );
-            if (!categories.includes(selectedMissingCreativeCategory)) selectedMissingCreativeCategory = '';
-            const visibleCreatives = selectedMissingCreativeCategory
-                ? displayCreatives.filter(item => categoryFor(item) === selectedMissingCreativeCategory)
+            selectedMissingCreativeCategories = new Set(
+                [...selectedMissingCreativeCategories].filter(category => categories.includes(category))
+            );
+            const visibleCreatives = selectedMissingCreativeCategories.size
+                ? displayCreatives.filter(item => selectedMissingCreativeCategories.has(categoryFor(item)))
                 : displayCreatives;
             const categoryButton = (category, count, active) => `
                 <button type="button" aria-pressed="${active}" onclick="selectMissingCreativeCategory('${category === 'ALL' ? '' : btoa(unescape(encodeURIComponent(category)))}')" class="max-w-full break-all rounded-md border px-2 py-1 text-[10px] font-bold transition ${active ? 'border-cyan-700 bg-cyan-700 text-white' : 'border-cyan-200 bg-white text-cyan-900 hover:bg-cyan-50'}">
@@ -1697,15 +1727,19 @@
                     : `${visibleCreatives.length} creative${visibleCreatives.length === 1 ? '' : 's'} missing from ET ${escapeHtml(target)}`;
             const etOnly = Boolean(target && !stockTab);
             results.innerHTML = `
+                ${stockAvailabilityFilters}
                 <div class="mb-3 rounded-xl border border-cyan-100 bg-white/70 p-3">
                     <p class="mb-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Auto-detected creative suffixes</p>
-                    <div class="flex max-h-28 flex-wrap gap-2 overflow-y-auto" aria-label="Filter creatives by suffix">
-                    ${categoryButton('ALL', displayCreatives.length, !selectedMissingCreativeCategory)}
+                    <div class="flex max-h-28 flex-wrap items-center gap-2 overflow-y-auto" aria-label="Filter creatives by suffix">
+                    ${categoryButton('ALL', displayCreatives.length, selectedMissingCreativeCategories.size === 0)}
                     ${categories.map(category => categoryButton(
                         category,
                         categoryCounts.get(category),
-                        selectedMissingCreativeCategory === category
+                        selectedMissingCreativeCategories.has(category)
                     )).join('')}
+                    ${selectedMissingCreativeCategories.size > 1
+                        ? '<button type="button" aria-label="Clear selected suffix filters" onclick="selectMissingCreativeCategory(\'\')" class="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-700 hover:border-red-300 hover:bg-red-100"><i class="fa-solid fa-xmark" aria-hidden="true"></i><span>Clear</span></button>'
+                        : ''}
                     </div>
                 </div>
                 <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -1743,9 +1777,22 @@
         }
 
         function selectMissingCreativeCategory(encodedCategory) {
-            selectedMissingCreativeCategory = encodedCategory
-                ? decodeURIComponent(escape(atob(encodedCategory)))
-                : '';
+            if (!encodedCategory) {
+                selectedMissingCreativeCategories.clear();
+            } else {
+                const category = decodeURIComponent(escape(atob(encodedCategory)));
+                if (selectedMissingCreativeCategories.has(category)) {
+                    selectedMissingCreativeCategories.delete(category);
+                } else {
+                    selectedMissingCreativeCategories.add(category);
+                }
+            }
+            renderMissingCreativeFinder();
+        }
+
+        function selectMissingStockAvailability(filter) {
+            missingStockAvailabilityFilter = filter === 'missing' ? 'missing' : 'all';
+            selectedMissingCreativeCategories.clear();
             renderMissingCreativeFinder();
         }
 
@@ -1796,24 +1843,39 @@
             versionTypes.sort((a, b) => a === 'CRT_Name' ? -1 : b === 'CRT_Name' ? 1 : a.localeCompare(b));
 
             if (versionTypes.length < 2 || versionTypes.length > 40) {
-                selectedCreativeVersion = '';
+                selectedCreativeVersions.clear();
                 container.innerHTML = '';
                 container.classList.add('hidden');
                 return;
             }
 
-            if (!versionTypes.includes(selectedCreativeVersion)) selectedCreativeVersion = '';
+            selectedCreativeVersions = new Set([...selectedCreativeVersions].filter(version => versionTypes.includes(version)));
 
-            const buttonClass = version => selectedCreativeVersion === version
+            const buttonClass = selected => selected
                 ? 'bg-purple-700 text-white border-purple-700'
                 : 'bg-white text-purple-800 border-purple-200 hover:bg-purple-100';
-            container.innerHTML = `<button type="button" aria-pressed="${selectedCreativeVersion === ''}" onclick="selectCreativeVersion('')" class="rounded-md border px-2 py-1 text-[10px] font-bold ${buttonClass('')}">All Versions</button>` +
-                versionTypes.map(version => `<button type="button" aria-pressed="${selectedCreativeVersion === version}" onclick="selectCreativeVersion('${btoa(unescape(encodeURIComponent(version)))}')" class="max-w-full break-all rounded-md border px-2 py-1 text-[10px] font-bold ${buttonClass(version)}">${escapeHtml(version)}</button>`).join('');
+            container.innerHTML = `<button type="button" aria-pressed="${selectedCreativeVersions.size === 0}" onclick="selectCreativeVersion('')" class="rounded-md border px-2 py-1 text-[10px] font-bold ${buttonClass(selectedCreativeVersions.size === 0)}">All Versions</button>` +
+                (selectedCreativeVersions.size > 1
+                    ? '<button type="button" aria-label="Clear selected version filters" onclick="selectCreativeVersion(\'\')" class="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-700 hover:border-red-300 hover:bg-red-100"><i class="fa-solid fa-xmark" aria-hidden="true"></i><span>Clear</span></button>'
+                    : '') +
+                versionTypes.map(version => {
+                    const selected = selectedCreativeVersions.has(version);
+                    return `<button type="button" aria-pressed="${selected}" onclick="selectCreativeVersion('${btoa(unescape(encodeURIComponent(version)))}')" class="max-w-full break-all rounded-md border px-2 py-1 text-[10px] font-bold ${buttonClass(selected)}">${escapeHtml(version)}</button>`;
+                }).join('');
             container.classList.remove('hidden');
         }
 
         function selectCreativeVersion(encodedName) {
-            selectedCreativeVersion = encodedName ? decodeURIComponent(escape(atob(encodedName))) : '';
+            if (!encodedName) {
+                selectedCreativeVersions.clear();
+            } else {
+                const version = decodeURIComponent(escape(atob(encodedName)));
+                if (selectedCreativeVersions.has(version)) {
+                    selectedCreativeVersions.delete(version);
+                } else {
+                    selectedCreativeVersions.add(version);
+                }
+            }
             globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
             renderTable();
         }
@@ -1934,11 +1996,11 @@
                     });
                     filteredData.sort((a, b) => a.filter_date.localeCompare(b.filter_date));
                 }
-                if (selectedCreativeVersion) {
+                if (selectedCreativeVersions.size) {
                     const baseName = creativeFinderVal.trim().replace(/[_-]+$/, '');
-                    filteredData = filteredData.filter(item => selectedCreativeVersion === 'Domains'
+                    filteredData = filteredData.filter(item => [...selectedCreativeVersions].some(version => version === 'Domains'
                         ? /_[-a-z0-9]+(?:\.[-a-z0-9]+)+$/i.test(item.et.trim())
-                        : getCreativeVersionType(item.et, baseName) === selectedCreativeVersion);
+                        : getCreativeVersionType(item.et, baseName) === version));
                 }
             } else {
                 // DATE VIEW: Normal date filtering
@@ -2136,7 +2198,7 @@
 
         function handleCreativeFinderInput() {
             creativeSuggestionsSuppressed = false;
-            selectedCreativeVersion = '';
+            selectedCreativeVersions.clear();
             globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
             renderTable();
         }
@@ -2191,7 +2253,7 @@
             document.getElementById('creative-finder-date-range').checked = false;
             dateRangeManuallyChanged = true;
             creativeSuggestionsSuppressed = true;
-            selectedCreativeVersion = '';
+            selectedCreativeVersions.clear();
             globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
             closeChangeHistory();
             closeCreativeSuggestions();
