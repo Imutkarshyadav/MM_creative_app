@@ -1619,18 +1619,15 @@
                 const selectedColors = Array.isArray(saved?.selectedColors)
                     ? saved.selectedColors.map(color => getSafeTabColor(color)?.toUpperCase()).filter(Boolean)
                     : [];
-                const isLegacyRedDefault = saved?.showAllColors === undefined
-                    && selectedColors.length === 1
-                    && selectedColors[0] === '#FF0000';
-                const showAllColors = saved?.showAllColors === true || isLegacyRedDefault || !saved;
+                const showAllColors = saved?.showAllColors === true;
                 return {
                     showMarkers: saved?.showMarkers !== false,
-                    selectedColors: showAllColors ? [] : selectedColors,
+                    selectedColors: showAllColors ? [] : (selectedColors.length ? selectedColors : ['#FF0000']),
                     showAllColors
                 };
             } catch (error) {
                 console.error('Could not load tab-color preferences:', error);
-                return { showMarkers: true, selectedColors: [], showAllColors: true };
+                return { showMarkers: true, selectedColors: ['#FF0000'], showAllColors: false };
             }
         }
 
