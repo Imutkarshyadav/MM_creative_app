@@ -3,16 +3,24 @@ import socketserver
 import urllib.request
 import urllib.parse
 import json
+import gzip
 import time
-import pandas as pd
 import io
-from datetime import datetime
+from http.cookies import CookieError, SimpleCookie
+from datetime import date, datetime
 import os
-import warnings
-from api.index import load_missing_stock, MISSING_STOCK_SHEET_URL
-
-# Prevent openpyxl warnings
-warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
+from api.index import (
+    ADMIN_COOKIE_NAME,
+    ADMIN_SESSION_SECONDS,
+    CalamineWorkbook,
+    admin_api_request,
+    extract_sheet_cell_colors,
+    extract_sheet_tab_colors,
+    is_completed_status,
+    load_missing_stock,
+    MISSING_STOCK_SHEET_URL,
+    spreadsheet_column_name
+)
 
 PORT = int(os.environ.get("PORT", 8024))
 SHEET_ID = "128O1hciqdQ2eClfQ6O0m_klXecO6d8hsNvXSCMoXQMI"
@@ -23,10 +31,12 @@ HISTORY_FILE = 'creative_history.json'
 cache = {
     "timestamp": 0,
     "data": None,
+    "response_body": None,
+    "gzip_body": None,
     "last_raw_excel": None,
     "local_date": None
 }
-CACHE_DURATION = 15 # Increased to 15s to prevent Google from blocking the cloud IP
+CACHE_DURATION = 15
 
 def get_client_local_date(headers):
     value = headers.get("X-Local-Date", "").strip()
@@ -37,6 +47,26 @@ def get_client_local_date(headers):
     except ValueError:
         pass
     return datetime.now().date()
+
+
+def parse_sheet_date(value):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    for date_format in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d-%b-%Y", "%d %b %Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(text, date_format).date()
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
 
 
 def load_history():
@@ -50,13 +80,111 @@ def save_history(history):
         json.dump(history, f, indent=2)
 
 class SyncHandler(http.server.SimpleHTTPRequestHandler):
+    def handle_admin_api(self, method):
+        payload = {}
+        if method != "GET":
+            if self.headers.get_content_type() != "application/json":
+                self.send_error(400, "Expected a JSON request.")
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+                if content_length < 0 or content_length > 4096:
+                    raise ValueError("Request body is too large.")
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as error:
+                response = json.dumps({"success": False, "error": str(error)}).encode("utf-8")
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(response)))
+                self.end_headers()
+                self.wfile.write(response)
+                return
+            if not isinstance(payload, dict):
+                response = json.dumps({"success": False, "error": "Expected a JSON object."}).encode("utf-8")
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(response)))
+                self.end_headers()
+                self.wfile.write(response)
+                return
+
+        cookies = SimpleCookie()
+        try:
+            cookies.load(self.headers.get("Cookie", ""))
+        except CookieError:
+            response = json.dumps({"success": False, "error": "Invalid session cookie."}).encode("utf-8")
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(response)
+            return
+        session_cookie = cookies.get(ADMIN_COOKIE_NAME)
+        session_token = session_cookie.value if session_cookie else ""
+        try:
+            status, result, token = admin_api_request(
+                method,
+                payload,
+                session_token,
+                self.client_address[0]
+            )
+        except RuntimeError as error:
+            print(f"Admin settings request failed: {error}")
+            status, result, token = 503, {"success": False, "error": str(error)}, None
+
+        response = json.dumps(result).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.send_header("Cache-Control", "no-store")
+        if token == "clear":
+            self.send_header(
+                "Set-Cookie",
+                f"{ADMIN_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+            )
+        elif token:
+            cookie = (
+                f"{ADMIN_COOKIE_NAME}={token}; Path=/; Max-Age={ADMIN_SESSION_SECONDS}; "
+                "HttpOnly; SameSite=Lax"
+            )
+            forwarded_proto = self.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip()
+            if forwarded_proto == "https":
+                cookie += "; Secure"
+            self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+        self.wfile.write(response)
+
     def do_GET(self):
         parsed_path = urllib.parse.urlsplit(self.path)
+        if parsed_path.path == "/api/admin/config":
+            self.handle_admin_api("GET")
+            return
+
         if parsed_path.path == '/api/missing-stock':
             try:
                 stock = load_missing_stock()
+                tabs_by_name = {tab['name']: tab for tab in stock['tabs']}
                 tab_name = urllib.parse.parse_qs(parsed_path.query).get('tab', [''])[0].strip()
-                if tab_name and tab_name not in stock['entries']:
+                query_params = urllib.parse.parse_qs(parsed_path.query)
+                if query_params.get('all_tabs', [''])[0] == 'true':
+                    entries = [
+                        {
+                            **entry,
+                            "stock_tab": name,
+                            "stock_tab_color": tabs_by_name[name]['tab_color']
+                        }
+                        for name, tab_entries in stock['entries'].items()
+                        for entry in tab_entries
+                    ]
+                    status_code = 200
+                    payload = {
+                        "success": True,
+                        "tab": "All stock tabs",
+                        "sheet_url": MISSING_STOCK_SHEET_URL,
+                        "entries": entries
+                    }
+                elif tab_name and tab_name not in stock['entries']:
                     status_code = 404
                     payload = {"success": False, "error": "The selected stock tab was not found."}
                 elif tab_name:
@@ -65,7 +193,14 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
                         "success": True,
                         "tab": tab_name,
                         "sheet_url": MISSING_STOCK_SHEET_URL,
-                        "entries": stock['entries'][tab_name]
+                        "entries": [
+                            {
+                                **entry,
+                                "stock_tab": tab_name,
+                                "stock_tab_color": tabs_by_name[tab_name]['tab_color']
+                            }
+                            for entry in stock['entries'][tab_name]
+                        ]
                     }
                 else:
                     status_code = 200
@@ -99,6 +234,8 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
                     and current_time - cache["timestamp"] < CACHE_DURATION
                 ):
                     results = cache["data"]
+                    response_body = cache["response_body"]
+                    gzip_body = cache["gzip_body"]
                 else:
                     try:
                         # Use a realistic browser User-Agent to avoid Google blocking data center IPs
@@ -123,105 +260,133 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
                         else:
                             raise Exception(f"Failed to download from Google Sheets: {str(fetch_err)}")
                     
-                    sheets = pd.read_excel(io.BytesIO(excel_data), sheet_name=None, engine='calamine')
+                    workbook = CalamineWorkbook.from_filelike(io.BytesIO(excel_data))
+                    tab_colors = extract_sheet_tab_colors(excel_data)
+                    cell_colors = extract_sheet_cell_colors(excel_data)
                     
                     history = load_history()
                     history_dirty = False
                     results = []
                     
-                    for tab_name, df in sheets.items():
-                        cols = df.columns
-                        date_col = cols[0] if len(cols) > 0 else None
-                        creative_col = next((c for c in cols if 'CREATIVE' in str(c).upper()), None)
-                        status_col = next((c for c in cols if 'STATUS' in str(c).upper()), None)
-                        
-                        if creative_col and status_col and date_col:
-                            explicit_date_rows = [
-                                row_number
-                                for row_number, (_, source_row) in enumerate(df.iterrows(), start=2)
-                                if (
-                                    pd.notna(source_row[date_col])
-                                    and str(source_row[date_col]).strip()
-                                    and pd.notna(source_row[creative_col])
-                                    and str(source_row[creative_col]).strip()
+                    for tab_name in workbook.sheet_names:
+                        rows = workbook.get_sheet_by_name(tab_name).to_python()
+                        if not rows:
+                            continue
+
+                        headers = rows[0]
+                        date_col = 0
+                        creative_col = next(
+                            (index for index, value in enumerate(headers) if 'CREATIVE' in str(value or '').upper()),
+                            None
+                        )
+                        status_col = next(
+                            (index for index, value in enumerate(headers) if 'STATUS' in str(value or '').upper()),
+                            None
+                        )
+                        if creative_col is None or status_col is None:
+                            continue
+
+                        explicit_date_rows = [
+                            row_number
+                            for row_number, row in enumerate(rows[1:], start=2)
+                            if (
+                                date_col < len(row)
+                                and row[date_col] is not None
+                                and str(row[date_col]).strip()
+                                and creative_col < len(row)
+                                and row[creative_col] is not None
+                                and str(row[creative_col]).strip()
+                            )
+                        ]
+                        last_explicit_date_row = max(explicit_date_rows, default=None)
+                        last_date = None
+
+                        for row_number, row in enumerate(rows[1:], start=2):
+                            raw_date = row[date_col] if date_col < len(row) else None
+                            if raw_date is not None and str(raw_date).strip():
+                                last_date = raw_date
+                            else:
+                                raw_date = last_date
+
+                            et_name = row[creative_col] if creative_col < len(row) else None
+                            if et_name is None or not str(et_name).strip():
+                                continue
+
+                            tab_name_str = str(tab_name).strip()
+                            et_name_str = str(et_name).strip()
+                            unique_key = f"{tab_name_str}|||{et_name_str}"
+
+                            if unique_key in history and isinstance(history[unique_key], str):
+                                history[unique_key] = {
+                                    "display_time": history[unique_key],
+                                    "iso_date": datetime.now().strftime('%Y-%m-%d')
+                                }
+                                history_dirty = True
+
+                            if unique_key not in history:
+                                history[unique_key] = {
+                                    "display_time": datetime.now().strftime('%b %d, %I:%M %p'),
+                                    "iso_date": datetime.now().strftime('%Y-%m-%d')
+                                }
+                                history_dirty = True
+
+                            discovered_display = history[unique_key]["display_time"]
+                            if last_explicit_date_row is None or row_number > last_explicit_date_row:
+                                raw_date = client_today
+                            if raw_date is None:
+                                continue
+
+                            parsed_date = parse_sheet_date(raw_date)
+                            display_date_str = parsed_date.isoformat() if parsed_date else str(raw_date).strip().split(' ')[0]
+                            filter_date_str = parsed_date.isoformat() if parsed_date else "1970-01-01"
+
+                            raw_status = row[status_col] if status_col < len(row) else None
+                            raw_status = str(raw_status).strip() if raw_status is not None else "PENDING/BLANK"
+                            is_done = is_completed_status(raw_status)
+
+                            results.append({
+                                "tab": tab_name_str,
+                                "row_number": row_number,
+                                "date": display_date_str,
+                                "filter_date": filter_date_str,
+                                "et": et_name_str,
+                                "status": raw_status,
+                                "is_done": is_done,
+                                "discovered_at": discovered_display,
+                                "tab_color": tab_colors.get(tab_name_str),
+                                "creative_colors": cell_colors.get(tab_name_str, {}).get(
+                                    f"{spreadsheet_column_name(creative_col)}{row_number}", []
                                 )
-                            ]
-                            last_explicit_date_row = max(explicit_date_rows, default=None)
-                            df[date_col] = df[date_col].ffill()
-                            
-                            for row_number, (_, row) in enumerate(df.iterrows(), start=2):
-                                et_name = row[creative_col]
-                                if pd.isna(et_name) or str(et_name).strip() == "":
-                                    continue
-                                
-                                tab_name_str = str(tab_name).strip()
-                                et_name_str = str(et_name).strip()
-                                
-                                unique_key = f"{tab_name_str}|||{et_name_str}"
-                                
-                                if unique_key in history and isinstance(history[unique_key], str):
-                                    history[unique_key] = {
-                                        "display_time": history[unique_key],
-                                        "iso_date": datetime.now().strftime('%Y-%m-%d')
-                                    }
-                                    history_dirty = True
-                                    
-                                if unique_key not in history:
-                                    history[unique_key] = {
-                                        "display_time": datetime.now().strftime('%b %d, %I:%M %p'),
-                                        "iso_date": datetime.now().strftime('%Y-%m-%d')
-                                    }
-                                    history_dirty = True
-                                
-                                discovered_display = history[unique_key]["display_time"]
-                                raw_date = row[date_col]
-                                
-                                if row_number > (last_explicit_date_row or 1):
-                                    raw_date = client_today
-                                elif pd.isna(raw_date):
-                                    continue
-                                    
-                                parsed_dt = pd.to_datetime(raw_date, errors='coerce')
-                                if pd.notna(parsed_dt):
-                                    display_date_str = parsed_dt.strftime('%Y-%m-%d')
-                                    filter_date_str = display_date_str
-                                else:
-                                    display_date_str = str(raw_date).strip().split(' ')[0]
-                                    try:
-                                        filter_date_str = datetime.strptime(display_date_str, '%d/%m/%Y').strftime('%Y-%m-%d')
-                                    except:
-                                        filter_date_str = "1970-01-01"
-                                
-                                raw_status = str(row[status_col]).strip() if pd.notna(row[status_col]) else "PENDING/BLANK"
-                                status_upper = raw_status.upper()
-                                
-                                is_done = ("DONE" in status_upper or status_upper == "Y")
-                                
-                                results.append({
-                                    "tab": tab_name_str,
-                                    "row_number": row_number,
-                                    "date": str(display_date_str),
-                                    "filter_date": filter_date_str,
-                                    "et": et_name_str,
-                                    "status": raw_status,
-                                    "is_done": is_done,
-                                    "discovered_at": discovered_display
-                                })
+                            })
                     
                     if history_dirty:
                         save_history(history)
                         
                     cache["data"] = results
-                    cache["timestamp"] = current_time
                     cache["local_date"] = client_today.isoformat()
+                    cache["response_body"] = json.dumps(
+                        {"success": True, "data": results},
+                        separators=(",", ":")
+                    ).encode("utf-8")
+                    cache["gzip_body"] = gzip.compress(
+                        cache["response_body"],
+                        compresslevel=5,
+                        mtime=0
+                    )
+                    cache["timestamp"] = time.time()
+                    response_body = cache["response_body"]
+                    gzip_body = cache["gzip_body"]
 
                 self.send_response(200)
-                self.send_header('Content-type', 'application/json')
+                accepts_gzip = "gzip" in self.headers.get("Accept-Encoding", "").lower()
+                response = gzip_body if accepts_gzip else response_body
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(response)))
+                if accepts_gzip:
+                    self.send_header('Content-Encoding', 'gzip')
+                    self.send_header('Vary', 'Accept-Encoding')
                 self.end_headers()
-                self.wfile.write(json.dumps({
-                    "success": True, 
-                    "data": results
-                }).encode('utf-8'))
+                self.wfile.write(response)
                 
             except Exception as e:
                 print("Error during sync:", e)
@@ -231,6 +396,18 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
         else:
             super().do_GET()
+
+    def do_POST(self):
+        if urllib.parse.urlsplit(self.path).path == "/api/admin/config":
+            self.handle_admin_api("POST")
+            return
+        self.send_error(404, "Not found.")
+
+    def do_PUT(self):
+        if urllib.parse.urlsplit(self.path).path == "/api/admin/config":
+            self.handle_admin_api("PUT")
+            return
+        self.send_error(404, "Not found.")
 
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))

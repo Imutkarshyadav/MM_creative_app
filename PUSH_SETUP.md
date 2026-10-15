@@ -31,6 +31,23 @@ The app supports Web Push through the service worker. Push is sent when a fresh 
 
 5. Redeploy after saving the variables. In the deployed app, enable **Alerts** on each device and approve browser notification permission. Subscriptions are limited to 100 devices per deployment.
 
+## Admin Access
+
+The header's **Admin Access** button protects the app-wide Color Settings visibility toggle.
+
+- Set `ADMIN_PASSWORD` as an environment variable; use a strong password and do not commit it or send it in chat. For local development, set it in the PowerShell process before starting the server:
+
+  ```powershell
+  $env:ADMIN_PASSWORD = "use-a-strong-secret-here"
+  python app_server.py
+  ```
+
+- On Vercel, add `ADMIN_PASSWORD` under **Project → Settings → Environment Variables**, then redeploy.
+- Vercel admin settings must persist across function instances, so also configure `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` as described above. Without both, the app reports an error instead of pretending a setting change was saved.
+- Local admin settings are stored in `admin_settings.json`, which is excluded from Git. The admin session is held in an HttpOnly cookie and expires after four hours.
+- Once signed in, use **Change admin password** in the Admin Access panel. Passwords must be at least 12 characters and are stored as salted hashes in the same persistent settings store; changing the password invalidates existing admin sessions except the session that made the change. After a password is changed, the saved hash takes precedence over `ADMIN_PASSWORD`. To reset a forgotten changed password, remove the saved `admin_password_hash` and `admin_password_salt` fields from the local `admin_settings.json` or stored Upstash settings, then restart or redeploy; the configured `ADMIN_PASSWORD` will be used again.
+- Color Settings visibility is refreshed by open app pages every 30 seconds. The setting affects which users see the control; their saved color preferences are unchanged.
+
 ## Device requirements and behavior
 
 - **Android:** Use current Chrome (or another browser supporting Web Push). HTTPS is required; installing the app from the browser menu is recommended.

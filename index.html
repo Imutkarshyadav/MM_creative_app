@@ -32,7 +32,7 @@
         @media (max-width: 640px) {
             #header-actions {
                 display: grid;
-                grid-template-columns: minmax(0, 1fr) auto auto auto;
+                grid-template-columns: minmax(0, 1fr) auto auto auto auto;
                 justify-content: stretch;
             }
 
@@ -116,6 +116,33 @@
                     <button type="button" id="change-history-btn" onclick="openChangeHistory()" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-100" aria-label="Change history" title="Change history">
                         <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
                     </button>
+
+                    <button type="button" id="admin-access-btn" onclick="openAdminAccess()" class="flex h-10 w-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-100 sm:w-auto sm:px-3" aria-label="Admin Access" title="Admin Access">
+                        <i class="fa-solid fa-user-shield" aria-hidden="true"></i>
+                        <span class="hidden text-xs font-bold sm:inline">Admin Access</span>
+                    </button>
+
+                    <div id="tab-color-settings" class="relative shrink-0">
+                        <button type="button" id="tab-color-settings-toggle" onclick="toggleTabColorSettings()" aria-label="Color settings" aria-expanded="false" aria-controls="tab-color-settings-panel" title="Color settings" class="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-100">
+                            <i class="fa-solid fa-palette" aria-hidden="true"></i>
+                        </button>
+                        <section id="tab-color-settings-panel" aria-label="Tab color settings" class="absolute right-0 top-full z-[60] mt-2 hidden w-[min(21rem,calc(100vw-1.5rem))] rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl shadow-slate-900/15">
+                            <div class="mb-3">
+                                <h2 class="text-sm font-extrabold text-slate-900">Tab color settings</h2>
+                                <p class="mt-1 text-xs leading-relaxed text-slate-500">Keep every ET and tab visible, and highlight the selected tab colors.</p>
+                            </div>
+                            <label class="mb-4 flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
+                                <span class="text-xs font-bold text-slate-700">Show color markers</span>
+                                <input id="tab-color-markers-toggle" type="checkbox" class="h-4 w-4 accent-blue-700" onchange="toggleTabColorMarkers(this.checked)">
+                            </label>
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Highlight colors</span>
+                                <button id="tab-color-all-button" type="button" aria-pressed="true" onclick="selectTabColor('')" class="rounded-lg border border-blue-700 bg-blue-700 px-2.5 py-1 text-[10px] font-bold text-white">All colors</button>
+                            </div>
+                            <div id="tab-color-options" class="mt-2 flex max-h-40 flex-wrap gap-2 overflow-y-auto" aria-label="Available spreadsheet tab colors"></div>
+                            <p id="tab-color-selection-summary" class="mt-3 text-[10px] text-slate-500" aria-live="polite">Showing tabs of every color.</p>
+                        </section>
+                    </div>
     
                     <!-- Main Sync Button -->
                     <button onclick="fetchData()" id="sync-btn" class="flex shrink-0 items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xl shadow-slate-900/10 sm:px-6 sm:text-sm hover:-translate-y-0.5 active:translate-y-0 active:shadow-md">
@@ -139,7 +166,7 @@
                 <!-- ET Filter Box (Respects Date) -->
                 <div class="flex w-full min-w-0 items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-2.5 transition-all focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-50 sm:max-w-sm sm:flex-1">
                     <i class="fa-solid fa-filter text-slate-400 text-sm"></i>
-                    <input type="text" id="search-et" list="et-suggestions" placeholder="Filter ETs..." class="bg-transparent border-none p-0 text-sm font-medium text-slate-700 placeholder-slate-400 focus:outline-none w-full" onkeyup="renderTable()" onchange="renderTable()">
+                    <input type="text" id="search-et" list="et-suggestions" placeholder="Filter ETs..." class="bg-transparent border-none p-0 text-sm font-medium text-slate-700 placeholder-slate-400 focus:outline-none w-full" onkeyup="renderTablePreservingScroll()" onchange="renderTablePreservingScroll()">
                     <datalist id="et-suggestions"></datalist>
                 </div>
 
@@ -148,9 +175,12 @@
                     <div class="flex min-w-0 items-center gap-3">
                         <i class="fa-solid fa-magnifying-glass-location text-purple-400 text-sm"></i>
                         <input type="text" id="creative-finder" role="combobox" aria-autocomplete="list" aria-controls="creative-suggestions-panel" aria-expanded="false" placeholder="Global Creative Finder..." class="min-w-0 bg-transparent border-none p-0 text-sm font-medium text-purple-900 placeholder-purple-400 focus:outline-none w-full" oninput="handleCreativeFinderInput()" onkeydown="if (event.key === 'Escape') closeCreativeSuggestions()">
+                        <button type="button" id="creative-finder-clear" onclick="clearCreativeFinder()" style="display: none;" class="h-6 w-6 shrink-0 items-center justify-center rounded-full text-purple-500 transition hover:bg-purple-100 hover:text-purple-900 focus:outline-none focus:ring-2 focus:ring-purple-300" aria-label="Clear Global Creative Finder" title="Clear search">
+                            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                        </button>
                     </div>
                     <label class="flex cursor-pointer items-center gap-2 text-[11px] font-semibold text-purple-700">
-                        <input type="checkbox" id="creative-finder-date-range" class="accent-purple-700" onchange="renderTable()">
+                        <input type="checkbox" id="creative-finder-date-range" class="accent-purple-700" onchange="renderTablePreservingScroll()">
                         Apply date range
                     </label>
                     <div id="creative-finder-results" class="hidden absolute left-0 right-0 top-full z-50 mt-2 max-h-80 overflow-y-auto rounded-xl border border-purple-200 bg-white p-2 shadow-xl">
@@ -175,11 +205,11 @@
                     <div id="missing-creative-panel" class="hidden gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.7fr)] sm:p-6">
                         <label class="block min-w-0">
                             <span class="mb-1.5 block text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Creative or campaign name</span>
-                            <input id="missing-creative-query" type="search" autocomplete="off" placeholder="Type a creative or campaign name..." oninput="renderMissingCreativeFinder()" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
+                            <input id="missing-creative-query" type="search" autocomplete="off" placeholder="Type a creative or campaign name..." oninput="handleMissingCreativeQueryInput()" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
                         </label>
                         <label class="block min-w-0">
                             <span class="mb-1.5 block text-[10px] font-extrabold uppercase tracking-widest text-slate-500">ET to check</span>
-                            <select id="missing-creative-target" onchange="renderMissingCreativeFinder()" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
+                            <select id="missing-creative-target" onchange="renderMissingCreativeFinderPreservingScroll()" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
                                 <option value="">Sync data to choose an ET</option>
                             </select>
                         </label>
@@ -314,6 +344,66 @@
         </div>
     </main>
 
+    <div id="admin-access-modal" class="fixed inset-0 z-[80] hidden items-center justify-center bg-slate-950/50 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="admin-access-title" tabindex="-1" onclick="if (event.target === this) closeAdminAccess()">
+        <section class="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <header class="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-blue-600">Protected settings</p>
+                    <h2 id="admin-access-title" class="mt-1 text-lg font-black text-slate-900">Admin Access</h2>
+                </div>
+                <button type="button" aria-label="Close admin access" title="Close" onclick="closeAdminAccess()" class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-400">
+                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                </button>
+            </header>
+            <div id="admin-login-panel" class="p-5">
+                <form id="admin-login-form" onsubmit="submitAdminLogin(event)" class="space-y-4">
+                    <label for="admin-password" class="block text-xs font-bold text-slate-700">Admin password</label>
+                    <input id="admin-password" type="password" autocomplete="current-password" required class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50" placeholder="Enter admin password">
+                    <p id="admin-login-error" class="hidden rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700" role="alert"></p>
+                    <button type="submit" id="admin-login-submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-slate-800">
+                        <i class="fa-solid fa-lock" aria-hidden="true"></i> Sign in
+                    </button>
+                </form>
+            </div>
+            <div id="admin-settings-panel" class="hidden p-5">
+                <div class="mb-4 grid grid-cols-2 gap-2 border-b border-slate-200 pb-3" role="tablist" aria-label="Admin sections">
+                    <button id="admin-settings-tab" type="button" role="tab" aria-selected="true" aria-controls="admin-settings-content" tabindex="0" onclick="selectAdminTab('settings')" onkeydown="handleAdminTabKeydown(event)" class="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white">
+                        <i class="fa-solid fa-sliders mr-1" aria-hidden="true"></i> Settings
+                    </button>
+                    <button id="admin-password-tab" type="button" role="tab" aria-selected="false" aria-controls="admin-password-content" tabindex="-1" onclick="selectAdminTab('password')" onkeydown="handleAdminTabKeydown(event)" class="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200">
+                        <i class="fa-solid fa-key mr-1" aria-hidden="true"></i> Change Password
+                    </button>
+                </div>
+                <section id="admin-settings-content" role="tabpanel" aria-labelledby="admin-settings-tab">
+                    <p class="mb-4 text-sm leading-relaxed text-slate-600">Choose which settings are available in the app.</p>
+                    <label class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <span>
+                            <span class="block text-sm font-bold text-slate-800">Color Settings</span>
+                            <span class="mt-0.5 block text-xs text-slate-500">Show or hide the color settings button.</span>
+                        </span>
+                        <input id="admin-color-settings-toggle" type="checkbox" class="h-5 w-5 accent-blue-700" onchange="saveAdminColorSettings(this.checked)">
+                    </label>
+                </section>
+                <section id="admin-password-content" class="hidden" role="tabpanel" aria-labelledby="admin-password-tab" hidden>
+                    <form id="admin-change-password-form" onsubmit="changeAdminPassword(event)" class="space-y-3">
+                        <h3 class="text-sm font-bold text-slate-800">Change admin password</h3>
+                        <label for="admin-new-password" class="block text-xs font-bold text-slate-700">New password</label>
+                        <input id="admin-new-password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50" placeholder="At least 12 characters">
+                        <label for="admin-confirm-password" class="block text-xs font-bold text-slate-700">Confirm new password</label>
+                        <input id="admin-confirm-password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50" placeholder="Enter it again">
+                        <button type="submit" id="admin-change-password-submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-slate-800">
+                            <i class="fa-solid fa-key" aria-hidden="true"></i> Update password
+                        </button>
+                    </form>
+                </section>
+                <p id="admin-settings-message" class="mt-3 hidden rounded-lg border px-3 py-2 text-xs font-semibold" role="status" aria-live="polite"></p>
+                <button type="button" onclick="adminLogout()" class="mt-4 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">
+                    <i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i> Sign out
+                </button>
+            </div>
+        </section>
+    </div>
+
     <div id="versions-modal" class="fixed inset-0 z-[70] hidden items-center justify-center bg-slate-950/50 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="versions-modal-title" tabindex="-1" onclick="if (event.target === this) closeCreativeVersions()">
         <section class="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <header class="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
@@ -367,11 +457,13 @@
         let missingStockSheetUrl = '';
         let missingStockError = '';
         let missingStockLoading = false;
+        const ALL_MISSING_STOCK_TABS = '__all_stock_tabs__';
         let missingStockRequest = 0;
         let expandedGroups = {}; // Keep track of which ETs are open so background sync doesn't close them
         let hasFetchedOnce = false; // Prevent loading screen from flashing repeatedly if data is empty
         let isFetchingData = false;
         const GLOBAL_SEARCH_PAGE_SIZE = 200;
+        const SYNC_DATA_CACHE_KEY = 'creative-report-sync-data-v1';
         let globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
         let selectedCreativeVersions = new Set();
         let lastCreativeStates = null;
@@ -381,6 +473,14 @@
         const GROUPED_ALERT_HISTORY_KEY = 'creative-report-grouped-alert-history-v1';
         const groupedAlertHistory = loadGroupedAlertHistory();
         const AUTO_SYNC_INTERVAL_MS = 5000;
+        const TAB_COLOR_PREFERENCES_KEY = 'creative-report-tab-color-preferences-v1';
+        const tabColorPreferences = loadTabColorPreferences();
+        let showTabColorMarkers = tabColorPreferences.showMarkers;
+        let selectedTabColors = new Set(tabColorPreferences.selectedColors);
+        let showAllTabColors = tabColorPreferences.showAllColors;
+        let adminColorSettingsEnabled = true;
+        let adminAuthenticated = false;
+        let adminConfigurationError = '';
         const AUDIT_SEEN_EVENTS_KEY = 'creative-report-audit-seen-events-v1';
         const auditNotificationState = loadAuditNotificationState();
         let alertsEnabled = false;
@@ -656,7 +756,7 @@
             requestAnimationFrame(() => {
                 dialog.classList.remove('opacity-0');
                 panel.classList.remove('scale-95', 'opacity-0');
-                keepButton.focus();
+                keepButton.focus({ preventScroll: true });
             });
         }
 
@@ -670,7 +770,7 @@
             window.setTimeout(() => {
                 dialog.classList.add('hidden');
                 dialog.classList.remove('flex');
-                document.getElementById('notification-btn')?.focus();
+                document.getElementById('notification-btn')?.focus({ preventScroll: true });
             }, 200);
         }
 
@@ -979,14 +1079,14 @@
             renderChangeHistory();
             modal.classList.remove('hidden');
             modal.classList.add('flex');
-            modal.focus();
+            modal.focus({ preventScroll: true });
         }
 
         function closeChangeHistory() {
             const modal = document.getElementById('change-history-modal');
             modal.classList.add('hidden');
             modal.classList.remove('flex');
-            document.getElementById('change-history-btn')?.focus();
+            document.getElementById('change-history-btn')?.focus({ preventScroll: true });
         }
 
         function getCompletionStatesForDateRange(data, startDate, endDate) {
@@ -1007,7 +1107,7 @@
                     creatives.set(creativeName, state);
                 }
                 state.total++;
-                if (item.is_done) state.done++;
+                if (isCreativeDone(item)) state.done++;
             }
             return states;
         }
@@ -1036,7 +1136,7 @@
                     creatives.set(creativeName, state);
                 }
                 state.total++;
-                if (item.is_done) state.done++;
+                if (isCreativeDone(item)) state.done++;
                 const status = String(item.status || 'PENDING/BLANK');
                 state.statusCounts.set(status, (state.statusCounts.get(status) || 0) + 1);
                 const date = String(item.filter_date || item.date || '');
@@ -1320,11 +1420,13 @@
         }
 
         const backToTopButton = document.getElementById('back-to-top');
+        renderTabColorSettings();
         window.addEventListener('scroll', () => {
             backToTopButton.classList.toggle('hidden', window.scrollY < 300);
         }, { passive: true });
         document.addEventListener('keydown', event => {
             if (event.key === 'Escape') {
+                closeTabColorSettings();
                 closeCreativeVersions();
                 if (!document.getElementById('change-history-modal').classList.contains('hidden')) {
                     closeChangeHistory();
@@ -1333,6 +1435,8 @@
         });
         document.addEventListener('click', event => {
             if (!event.target.closest('#global-creative-finder')) closeCreativeSuggestions();
+            const settings = document.getElementById('tab-color-settings');
+            if (!settings || !event.composedPath().includes(settings)) closeTabColorSettings();
         });
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('/service-worker.js').catch(error => {
@@ -1394,7 +1498,7 @@
         function handleDateRangeChange() {
             const today = getLocalDateValue();
             dateRangeManuallyChanged = document.getElementById('start-date').value !== today || document.getElementById('end-date').value !== today;
-            renderTable();
+            renderTablePreservingScroll();
         }
 
         function updateDateRangeForNewDay(today = getLocalDateValue()) {
@@ -1408,7 +1512,7 @@
             if (shouldAdvance) {
                 startDate.value = today;
                 endDate.value = today;
-                renderTable();
+                renderTablePreservingScroll();
             }
         }
 
@@ -1420,9 +1524,19 @@
 
         function getCreativeVersionType(name, baseName) {
             if (/_[-a-z0-9]+(?:\.[-a-z0-9]+)+$/i.test(name.trim())) return 'Domains';
-            const suffix = name.trim().slice(baseName.length).replace(/^[_\s-]+/, '');
+            const creativeName = name.trim();
+            const base = baseName.trim().replace(/[_\s-]+$/, '');
+            if (/(?:[_\s-]+)XCE\s+CM$/i.test(creativeName)) return 'XCE CM';
+
+            const knownSuffix = creativeName.match(/(?:[_\s-]+)(IMG|ORG|GZ)$/i);
+            if (knownSuffix) return knownSuffix[1].toUpperCase();
+
+            const hasCreativePrefix = base
+                && creativeName.toLocaleLowerCase().startsWith(base.toLocaleLowerCase());
+            const suffix = hasCreativePrefix
+                ? creativeName.slice(base.length).replace(/^[_\s-]+/, '')
+                : '';
             const tokens = suffix.split(/[_\s-]+/).filter(Boolean);
-            if (tokens.slice(-2).map(token => token.toUpperCase()).join(' ') === 'XCE CM') return 'XCE CM';
             return tokens.length ? tokens[tokens.length - 1].toUpperCase() : 'CRT_Name';
         }
 
@@ -1453,6 +1567,394 @@
             })[character]);
         }
 
+        function getSafeTabColor(color) {
+            return typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color) ? color : '';
+        }
+
+        function tabColorIndicator(color) {
+            const safeColor = getEnabledTabMarkerColor(color);
+            return showTabColorMarkers && safeColor
+                ? `<span class="mr-1" style="color:${safeColor}" aria-label="Spreadsheet tab color ${safeColor}">&#9679;</span>`
+                : '';
+        }
+
+        function tabColorStyleAttribute(color) {
+            const safeColor = getEnabledTabMarkerColor(color);
+            return showTabColorMarkers && safeColor ? ` style="color:${safeColor}"` : '';
+        }
+
+        function tabColorOptionPrefix(color) {
+            return showTabColorMarkers && getEnabledTabMarkerColor(color) ? '&#9679; ' : '';
+        }
+
+        function getEnabledTabMarkerColor(color) {
+            const safeColor = getSafeTabColor(color);
+            if (!safeColor || showAllTabColors) return safeColor;
+            return selectedTabColors.has(safeColor.toUpperCase()) ? safeColor : '';
+        }
+
+        function creativeColorStyleAttribute(colors) {
+            if (!showTabColorMarkers || !Array.isArray(colors)) return '';
+            const color = colors.map(getEnabledTabMarkerColor).find(Boolean);
+            if (!color) return '';
+            const red = parseInt(color.slice(1, 3), 16);
+            const green = parseInt(color.slice(3, 5), 16);
+            const blue = parseInt(color.slice(5, 7), 16);
+            return ` style="color:${color};background-color:rgba(${red},${green},${blue},0.12);border-radius:0.25rem;padding:0 0.25rem"`;
+        }
+
+        function isCreativeDone(item) {
+            return item.is_done === true || String(item.status || '').toUpperCase().includes('IGNORE');
+        }
+
+        function getCreativeStatusLabel(item) {
+            return String(item.status || '').toUpperCase().includes('IGNORE')
+                ? 'Ignore'
+                : isCreativeDone(item) ? 'Done' : String(item.status || 'PENDING');
+        }
+
+        function loadTabColorPreferences() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(TAB_COLOR_PREFERENCES_KEY) || 'null');
+                const selectedColors = Array.isArray(saved?.selectedColors)
+                    ? saved.selectedColors.map(color => getSafeTabColor(color)?.toUpperCase()).filter(Boolean)
+                    : [];
+                const isLegacyRedDefault = saved?.showAllColors === undefined
+                    && selectedColors.length === 1
+                    && selectedColors[0] === '#FF0000';
+                const showAllColors = saved?.showAllColors === true || isLegacyRedDefault || !saved;
+                return {
+                    showMarkers: saved?.showMarkers !== false,
+                    selectedColors: showAllColors ? [] : selectedColors,
+                    showAllColors
+                };
+            } catch (error) {
+                console.error('Could not load tab-color preferences:', error);
+                return { showMarkers: true, selectedColors: [], showAllColors: true };
+            }
+        }
+
+        function saveTabColorPreferences() {
+            try {
+                localStorage.setItem(TAB_COLOR_PREFERENCES_KEY, JSON.stringify({
+                    showMarkers: showTabColorMarkers,
+                    selectedColors: [...selectedTabColors],
+                    showAllColors: showAllTabColors
+                }));
+            } catch (error) {
+                console.error('Could not save tab-color preferences:', error);
+            }
+        }
+
+        function getAvailableTabColors() {
+            return [...new Set([
+                ...globalData.map(item => item.tab_color),
+                ...globalData.flatMap(item => item.creative_colors || []),
+                ...missingStockEntries.flatMap(item => item.creative_colors || []),
+                ...missingStockTabs.map(tab => tab.tab_color)
+            ].map(getSafeTabColor).filter(Boolean).map(color => color.toUpperCase()))].sort();
+        }
+
+        function getTabColorName(color) {
+            const normalized = getSafeTabColor(color)?.toUpperCase();
+            const names = {
+                '#FF0000': 'Red',
+                '#00FF00': 'Green',
+                '#0000FF': 'Blue',
+                '#1155CC': 'Blue',
+                '#00FFFF': 'Cyan',
+                '#FF9900': 'Orange',
+                '#9900FF': 'Purple',
+                '#FF00FF': 'Magenta',
+                '#A64D79': 'Mauve'
+            };
+            return names[normalized] || normalized;
+        }
+
+        function setColorSettingsAvailable(enabled) {
+            adminColorSettingsEnabled = Boolean(enabled);
+            const colorSettings = document.getElementById('tab-color-settings');
+            if (colorSettings) colorSettings.classList.toggle('hidden', !adminColorSettingsEnabled);
+        }
+
+        async function requestAdminConfig(method = 'GET', payload = {}) {
+            const response = await fetch('/api/admin/config', {
+                method,
+                credentials: 'same-origin',
+                headers: method === 'GET' ? {} : { 'Content-Type': 'application/json' },
+                body: method === 'GET' ? undefined : JSON.stringify(payload)
+            });
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.toLowerCase().includes('application/json')) {
+                throw new Error('Admin settings endpoint is unavailable. Restart or update the app server to enable Admin Access.');
+            }
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || `Admin request failed (${response.status}).`);
+            return result;
+        }
+
+        async function loadAdminConfiguration() {
+            try {
+                const settings = await requestAdminConfig();
+                setColorSettingsAvailable(settings.color_settings_enabled);
+                adminAuthenticated = settings.authenticated === true;
+                adminConfigurationError = '';
+            } catch (error) {
+                adminConfigurationError = error.message;
+                console.error('Could not load admin settings:', error);
+            }
+        }
+
+        function openAdminAccess() {
+            const modal = document.getElementById('admin-access-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            const loginError = document.getElementById('admin-login-error');
+            loginError.textContent = adminConfigurationError;
+            loginError.classList.toggle('hidden', !adminConfigurationError);
+            document.getElementById('admin-settings-message').classList.add('hidden');
+            showAdminAccessPanel(adminAuthenticated);
+        }
+
+        function closeAdminAccess() {
+            const modal = document.getElementById('admin-access-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            document.getElementById('admin-access-btn')?.focus({ preventScroll: true });
+        }
+
+        function showAdminAccessPanel(isAuthenticated) {
+            adminAuthenticated = isAuthenticated;
+            document.getElementById('admin-login-panel').classList.toggle('hidden', isAuthenticated);
+            document.getElementById('admin-settings-panel').classList.toggle('hidden', !isAuthenticated);
+            if (isAuthenticated) {
+                document.getElementById('admin-color-settings-toggle').checked = adminColorSettingsEnabled;
+                selectAdminTab('settings');
+            } else {
+                document.getElementById('admin-password').value = '';
+                document.getElementById('admin-password').focus({ preventScroll: true });
+            }
+        }
+
+        function selectAdminTab(tabName) {
+            const showPassword = tabName === 'password';
+            const settingsTab = document.getElementById('admin-settings-tab');
+            const passwordTab = document.getElementById('admin-password-tab');
+            const settingsContent = document.getElementById('admin-settings-content');
+            const passwordContent = document.getElementById('admin-password-content');
+
+            settingsTab.setAttribute('aria-selected', String(!showPassword));
+            passwordTab.setAttribute('aria-selected', String(showPassword));
+            settingsTab.tabIndex = showPassword ? -1 : 0;
+            passwordTab.tabIndex = showPassword ? 0 : -1;
+            settingsTab.className = !showPassword
+                ? 'rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white'
+                : 'rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200';
+            passwordTab.className = showPassword
+                ? 'rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white'
+                : 'rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200';
+            settingsContent.classList.toggle('hidden', showPassword);
+            passwordContent.classList.toggle('hidden', !showPassword);
+            passwordContent.hidden = !showPassword;
+        }
+
+        function handleAdminTabKeydown(event) {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const nextTab = event.key === 'Home' || event.key === 'ArrowLeft'
+                ? 'settings'
+                : 'password';
+            selectAdminTab(nextTab);
+            document.getElementById(`admin-${nextTab}-tab`).focus();
+        }
+
+        async function submitAdminLogin(event) {
+            event.preventDefault();
+            const submitButton = document.getElementById('admin-login-submit');
+            const errorMessage = document.getElementById('admin-login-error');
+            submitButton.disabled = true;
+            errorMessage.classList.add('hidden');
+            try {
+                const result = await requestAdminConfig('POST', {
+                    password: document.getElementById('admin-password').value
+                });
+                setColorSettingsAvailable(result.color_settings_enabled);
+                showAdminAccessPanel(true);
+            } catch (error) {
+                errorMessage.textContent = error.message;
+                errorMessage.classList.remove('hidden');
+            } finally {
+                submitButton.disabled = false;
+                document.getElementById('admin-password').value = '';
+            }
+        }
+
+        async function saveAdminColorSettings(enabled) {
+            const toggle = document.getElementById('admin-color-settings-toggle');
+            const message = document.getElementById('admin-settings-message');
+            toggle.disabled = true;
+            message.classList.add('hidden');
+            try {
+                const result = await requestAdminConfig('PUT', {
+                    color_settings_enabled: enabled
+                });
+                setColorSettingsAvailable(result.color_settings_enabled);
+                if (!result.color_settings_enabled) {
+                    document.getElementById('tab-color-settings-panel').classList.add('hidden');
+                    document.getElementById('tab-color-settings-toggle').setAttribute('aria-expanded', 'false');
+                }
+                message.textContent = result.color_settings_enabled
+                    ? 'Color Settings are enabled for the app.'
+                    : 'Color Settings are disabled for the app.';
+                message.className = 'mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800';
+            } catch (error) {
+                toggle.checked = adminColorSettingsEnabled;
+                message.textContent = error.message;
+                message.className = 'mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800';
+            } finally {
+                message.classList.remove('hidden');
+                toggle.disabled = false;
+            }
+        }
+
+        async function changeAdminPassword(event) {
+            event.preventDefault();
+            const form = document.getElementById('admin-change-password-form');
+            const submitButton = document.getElementById('admin-change-password-submit');
+            const message = document.getElementById('admin-settings-message');
+            const newPassword = document.getElementById('admin-new-password').value;
+            const confirmPassword = document.getElementById('admin-confirm-password').value;
+            submitButton.disabled = true;
+            message.classList.add('hidden');
+            try {
+                await requestAdminConfig('POST', {
+                    action: 'change_password',
+                    new_password: newPassword,
+                    confirm_password: confirmPassword
+                });
+                form.reset();
+                message.textContent = 'Admin password updated. Save your new password somewhere secure.';
+                message.className = 'mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800';
+            } catch (error) {
+                message.textContent = error.message;
+                message.className = 'mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800';
+            } finally {
+                message.classList.remove('hidden');
+                submitButton.disabled = false;
+            }
+        }
+
+        async function adminLogout() {
+            try {
+                await requestAdminConfig('POST', { action: 'logout' });
+                showAdminAccessPanel(false);
+                closeAdminAccess();
+            } catch (error) {
+                const message = document.getElementById('admin-settings-message');
+                message.textContent = error.message;
+                message.className = 'mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800';
+                message.classList.remove('hidden');
+            }
+        }
+
+        function isTabColorAllowed(color) {
+            return true;
+        }
+
+        function renderTabColorSettings() {
+            const markerToggle = document.getElementById('tab-color-markers-toggle');
+            const colorOptions = document.getElementById('tab-color-options');
+            const allButton = document.getElementById('tab-color-all-button');
+            const summary = document.getElementById('tab-color-selection-summary');
+            if (!markerToggle || !colorOptions || !allButton || !summary) return;
+
+            markerToggle.checked = showTabColorMarkers;
+            const colors = getAvailableTabColors();
+            colorOptions.innerHTML = colors.map(color => {
+                const selected = selectedTabColors.has(color);
+                return `<button type="button" aria-pressed="${selected}" onclick="selectTabColor('${color}')" class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] font-bold transition ${selected ? 'border-slate-800 bg-slate-800 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
+                    <span class="h-2.5 w-2.5 rounded-full border border-black/10" style="background-color:${color}" aria-hidden="true"></span>
+                    ${getTabColorName(color)}
+                </button>`;
+            }).join('') || '<span class="text-xs text-slate-500">Colors load when the report or stock tabs are available.</span>';
+            allButton.setAttribute('aria-pressed', String(showAllTabColors));
+            allButton.className = `rounded-lg border px-2.5 py-1 text-[10px] font-bold ${showAllTabColors ? 'border-blue-700 bg-blue-700 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`;
+            summary.textContent = !showAllTabColors
+                ? `All ETs and tabs remain visible. Highlighting ${[...selectedTabColors].map(getTabColorName).join(' + ')}.`
+                : 'Showing tabs of every color.';
+        }
+
+        function toggleTabColorSettings() {
+            const panel = document.getElementById('tab-color-settings-panel');
+            const toggle = document.getElementById('tab-color-settings-toggle');
+            const isHidden = panel.classList.contains('hidden');
+            panel.classList.toggle('hidden', !isHidden);
+            toggle.setAttribute('aria-expanded', String(isHidden));
+            if (isHidden) renderTabColorSettings();
+        }
+
+        function toggleTabColorMarkers(enabled) {
+            showTabColorMarkers = Boolean(enabled);
+            saveTabColorPreferences();
+            renderTabColorSettings();
+            renderMissingStockTabOptions();
+            renderTablePreservingScroll();
+            renderMissingCreativeFinderPreservingScroll();
+        }
+
+        function closeTabColorSettings() {
+            document.getElementById('tab-color-settings-panel').classList.add('hidden');
+            document.getElementById('tab-color-settings-toggle').setAttribute('aria-expanded', 'false');
+        }
+
+        function selectTabColor(color) {
+            const normalized = getSafeTabColor(color)?.toUpperCase();
+            if (!normalized) {
+                selectedTabColors.clear();
+                showAllTabColors = true;
+            } else if (selectedTabColors.has(normalized)) {
+                selectedTabColors.delete(normalized);
+                showAllTabColors = selectedTabColors.size === 0;
+            } else {
+                selectedTabColors.add(normalized);
+                showAllTabColors = false;
+            }
+            saveTabColorPreferences();
+            renderTabColorSettings();
+
+            const targetSelect = document.getElementById('missing-creative-target');
+            const targetColor = globalData.find(item => item.tab.trim() === targetSelect.value)?.tab_color;
+            if (targetSelect.value && !isTabColorAllowed(targetColor)) targetSelect.value = '';
+
+            const stockSelectionInvalid = renderMissingStockTabOptions();
+            if (stockSelectionInvalid) handleMissingStockTabChange();
+            const visibleEtNames = [...new Set(globalData
+                .filter(item => isTabColorAllowed(item.tab_color))
+                .map(item => item.tab))].sort();
+            const etDatalist = document.getElementById('et-suggestions');
+            if (etDatalist) {
+                etDatalist.innerHTML = visibleEtNames
+                    .map(name => `<option value="${name.replace(/"/g, '&quot;')}"></option>`)
+                    .join('');
+            }
+            renderTablePreservingScroll();
+            renderMissingCreativeFinderPreservingScroll();
+        }
+
+        function renderMissingStockTabOptions() {
+            const selector = document.getElementById('missing-stock-tab');
+            if (!selector || !missingStockTabs.length) return false;
+            const selectedTab = selector.value;
+            const visibleTabs = missingStockTabs.filter(tab => isTabColorAllowed(tab.tab_color));
+            selector.innerHTML = '<option value="">Choose a stock-sheet tab...</option>' +
+                `<option value="${ALL_MISSING_STOCK_TABS}">All stock tabs</option>` +
+                visibleTabs.map(tab => `<option value="${escapeHtml(tab.name)}"${tabColorStyleAttribute(tab.tab_color)}>${tabColorOptionPrefix(tab.tab_color)}${escapeHtml(tab.name)} (${tab.creative_count.toLocaleString()} creatives)</option>`).join('');
+            const selectionStillAvailable = selectedTab === ALL_MISSING_STOCK_TABS
+                || visibleTabs.some(tab => tab.name === selectedTab);
+            selector.value = selectionStillAvailable ? selectedTab : '';
+            return Boolean(selectedTab && !selectionStillAvailable);
+        }
+
         function closeCreativeSuggestions() {
             const panel = document.getElementById('creative-suggestions-panel');
             panel.classList.add('hidden');
@@ -1467,8 +1969,11 @@
                 return;
             }
 
+            const visibleCreativeNames = new Set(globalData
+                .filter(item => isTabColorAllowed(item.tab_color))
+                .map(item => item.et.trim().toLocaleLowerCase()));
             const suggestions = creativeNameSuggestions
-                .filter(name => name.toLowerCase().includes(query))
+                .filter(name => visibleCreativeNames.has(name.toLocaleLowerCase()) && name.toLowerCase().includes(query))
                 .slice(0, 8);
             if (suggestions.length === 0) {
                 closeCreativeSuggestions();
@@ -1486,7 +1991,7 @@
             selectedCreativeVersions.clear();
             globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
             closeCreativeSuggestions();
-            renderTable();
+            renderTablePreservingScroll();
         }
 
         async function loadMissingStockTabs() {
@@ -1499,33 +2004,38 @@
                 if (!response.ok || !result.success) throw new Error(result.error || `Stock sheet request failed (${response.status}).`);
                 missingStockTabs = result.tabs || [];
                 missingStockSheetUrl = result.sheet_url || '';
-                selector.innerHTML = '<option value="">Choose a stock-sheet tab...</option>' +
-                    missingStockTabs.map(tab => `<option value="${escapeHtml(tab.name)}">${escapeHtml(tab.name)} (${tab.creative_count.toLocaleString()} creatives)</option>`).join('');
+                renderMissingStockTabOptions();
+                selector.value = '';
                 missingStockError = '';
-                renderMissingCreativeFinder();
+                renderTabColorSettings();
+                renderMissingCreativeFinderPreservingScroll();
             } catch (error) {
                 console.error('Could not load stock-sheet tabs:', error);
                 missingStockError = error.message;
                 selector.innerHTML = '<option value="">Stock-sheet tabs unavailable</option>';
-                renderMissingCreativeFinder();
+                renderMissingCreativeFinderPreservingScroll();
             }
         }
 
         async function handleMissingStockTabChange() {
             const selectedTab = document.getElementById('missing-stock-tab').value;
             const currentRequest = ++missingStockRequest;
+            selectedMissingCreativeCategories.clear();
             missingStockEntries = [];
             missingStockError = '';
             if (!selectedTab) {
                 missingStockLoading = false;
-                renderMissingCreativeFinder();
+                renderMissingCreativeFinderPreservingScroll();
                 return;
             }
 
             missingStockLoading = true;
-            renderMissingCreativeFinder();
+            renderMissingCreativeFinderPreservingScroll();
             try {
-                const response = await fetch(`/api/missing-stock?tab=${encodeURIComponent(selectedTab)}`);
+                const stockUrl = selectedTab === ALL_MISSING_STOCK_TABS
+                    ? '/api/missing-stock?all_tabs=true'
+                    : `/api/missing-stock?tab=${encodeURIComponent(selectedTab)}`;
+                const response = await fetch(stockUrl);
                 const result = await response.json();
                 if (!response.ok || !result.success) throw new Error(result.error || `Stock tab request failed (${response.status}).`);
                 if (currentRequest !== missingStockRequest) return;
@@ -1538,9 +2048,28 @@
             } finally {
                 if (currentRequest === missingStockRequest) {
                     missingStockLoading = false;
-                    renderMissingCreativeFinder();
+                    renderMissingCreativeFinderPreservingScroll();
                 }
             }
+        }
+
+        function renderMissingCreativeFinderPreservingScroll() {
+            preserveScrollPosition(renderMissingCreativeFinder);
+        }
+
+        function handleMissingCreativeQueryInput() {
+            selectedMissingCreativeCategories.clear();
+            renderMissingCreativeFinderPreservingScroll();
+        }
+
+        function preserveScrollPosition(update) {
+            const scrollY = window.scrollY;
+            update();
+            requestAnimationFrame(() => window.scrollTo(0, scrollY));
+        }
+
+        function renderTablePreservingScroll() {
+            preserveScrollPosition(renderTable);
         }
 
         function setMissingCreativePanelExpanded(expanded) {
@@ -1553,6 +2082,7 @@
             toggle.setAttribute('aria-expanded', String(expanded));
             document.getElementById('missing-creative-toggle-icon').className = `fa-solid ${expanded ? 'fa-chevron-up' : 'fa-chevron-down'}`;
             document.getElementById('missing-creative-toggle-label').textContent = expanded ? 'Hide finder' : 'Show finder';
+            if (!expanded) clearMissingCreativeFilters();
         }
 
         function toggleMissingCreativePanel() {
@@ -1560,7 +2090,8 @@
             if (!panel) return;
 
             const expanded = panel.classList.contains('hidden');
-            setMissingCreativePanelExpanded(expanded);
+            preserveScrollPosition(() => setMissingCreativePanelExpanded(expanded));
+            if (expanded && !missingStockTabs.length) loadMissingStockTabs();
         }
 
         function clearMissingCreativeFilters() {
@@ -1580,10 +2111,14 @@
             if (!queryInput || !targetSelect || !stockTabSelect || !results) return;
 
             const selectedTarget = targetSelect.value;
-            const etNames = [...new Set(globalData.map(item => item.tab.trim()).filter(Boolean))]
+            const visibleEtItems = globalData.filter(item => isTabColorAllowed(item.tab_color));
+            const etNames = [...new Set(visibleEtItems.map(item => item.tab.trim()).filter(Boolean))]
                 .sort((a, b) => a.localeCompare(b));
             targetSelect.innerHTML = '<option value="">Choose an ET...</option>' +
-                etNames.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+                etNames.map(name => {
+                    const tabColor = visibleEtItems.find(item => item.tab.trim() === name)?.tab_color;
+                    return `<option value="${escapeHtml(name)}"${tabColorStyleAttribute(tabColor)}>${tabColorOptionPrefix(tabColor)}${escapeHtml(name)}</option>`;
+                }).join('');
             if (etNames.includes(selectedTarget)) targetSelect.value = selectedTarget;
 
             const queryText = queryInput.value.trim();
@@ -1613,11 +2148,12 @@
                 return;
             }
             if (stockTab && !missingStockTabs.length) {
-                results.innerHTML = '<p class="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">Sync the report to load its ETs and the linked stock-sheet tabs.</p>';
+                results.innerHTML = '<p class="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">Loading the linked stock-sheet tabs...</p>';
                 return;
             }
 
             const matchingEntries = stockTab ? missingStockEntries.filter(entry => {
+                    if (!isTabColorAllowed(entry.stock_tab_color)) return false;
                     const searchable = [
                         entry.campaign,
                         entry.campaign_code,
@@ -1635,11 +2171,13 @@
                         name: entry.creative.trim(),
                         campaign: entry.campaign,
                         campaignCode: entry.campaign_code || '',
-                        locations: []
+                        locations: [],
+                        creativeColors: []
                     };
                     stockByCreative.set(normalizedName, stockItem);
                 }
                 stockItem.locations.push(entry);
+                stockItem.creativeColors.push(...(entry.creative_colors || []));
             }
             const stockCreatives = [...stockByCreative.values()];
             const creativesInAnyEt = new Set(globalData.map(item => item.et.trim().toLocaleLowerCase()));
@@ -1659,14 +2197,16 @@
                     if (itemsInTarget.has(key)) continue;
                     let etItem = etByCreative.get(key);
                     if (!etItem) {
-                        etItem = { name, sources: new Set() };
+                        etItem = { name, sources: new Set(), creativeColors: [] };
                         etByCreative.set(key, etItem);
                     }
                     etItem.sources.add(entry.tab.trim());
+                    etItem.creativeColors.push(...(entry.creative_colors || []));
                 }
             }
             const etCreatives = [...etByCreative.values()];
             const bothSources = Boolean(target && stockTab);
+            const stockTabLabel = stockTab === ALL_MISSING_STOCK_TABS ? 'All stock tabs' : stockTab;
             const matchingStockCreatives = missingStockAvailabilityFilter === 'missing'
                 ? missingFromEveryEt
                 : stockCreatives;
@@ -1689,9 +2229,9 @@
                     return;
                 }
                 const message = bothSources
-                    ? `No stock creatives matching “${escapeHtml(queryText)}” were found in the ${escapeHtml(stockTab)} tab.`
+                    ? `No stock creatives matching “${escapeHtml(queryText)}” were found in ${escapeHtml(stockTabLabel)}.`
                     : stockTab
-                        ? `No creatives matching “${escapeHtml(queryText)}” were found in the ${escapeHtml(stockTab)} stock tab.`
+                        ? `No creatives matching “${escapeHtml(queryText)}” were found in ${escapeHtml(stockTabLabel)}.`
                         : `No matching creatives are missing from ET ${escapeHtml(target)}.`;
                 results.innerHTML = `<p class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-5 text-center text-sm font-semibold text-amber-800">${message}</p>`;
                 return;
@@ -1723,7 +2263,7 @@
             const resultTitle = bothSources
                 ? `${visibleCreatives.length} stock creative${visibleCreatives.length === 1 ? '' : 's'} to compare with ET ${escapeHtml(target)}`
                 : stockTab
-                    ? `${visibleCreatives.length} stock creative${visibleCreatives.length === 1 ? '' : 's'} in ${escapeHtml(stockTab)}`
+                    ? `${visibleCreatives.length} stock creative${visibleCreatives.length === 1 ? '' : 's'} in ${escapeHtml(stockTabLabel)}`
                     : `${visibleCreatives.length} creative${visibleCreatives.length === 1 ? '' : 's'} missing from ET ${escapeHtml(target)}`;
             const etOnly = Boolean(target && !stockTab);
             results.innerHTML = `
@@ -1762,13 +2302,15 @@
                             const sheetLink = stockLocation
                                 ? `${missingStockSheetUrl}#gid=${stockLocation.gid}&range=${encodeURIComponent(stockLocation.cell)}`
                                 : '';
+                            const stockLocationTab = stockLocation?.stock_tab || stockTabLabel;
+                            const stockLocationColor = stockLocation?.stock_tab_color;
                             return `<li class="grid grid-cols-1 gap-1 px-4 py-3 ${bothSources ? 'sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.2fr)_auto]' : etOnly ? 'sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.2fr)]' : 'sm:grid-cols-[minmax(0,1fr)_auto_auto]'} sm:items-center sm:gap-4">
-                            <span class="break-all text-sm font-bold text-slate-800">${escapeHtml(item.name)}</span>
+                            <span${creativeColorStyleAttribute(item.creativeColors)} class="break-all text-sm font-bold text-slate-800">${escapeHtml(item.name)}</span>
                             ${stockTab ? `<span class="w-fit rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-700">${item.locations.length} in stock</span>` : ''}
                             ${bothSources
                                 ? `<span class="w-fit rounded-full border px-2.5 py-1 text-[10px] font-bold ${statusClass}">${inTarget ? 'Already in selected ET' : 'Available to use in selected ET'}</span>`
                                 : etOnly ? '<span class="w-fit rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-800">Missing from selected ET</span>' : ''}
-                            ${stockTab ? `<a href="${escapeHtml(sheetLink)}" target="_blank" rel="noopener noreferrer" class="w-fit text-[11px] font-bold text-blue-700 underline decoration-blue-200 underline-offset-2 hover:text-blue-900">Open in ${escapeHtml(stockTab)}</a>` : ''}
+                            ${stockTab ? `<a href="${escapeHtml(sheetLink)}" target="_blank" rel="noopener noreferrer" class="w-fit text-[11px] font-bold text-blue-700 underline decoration-blue-200 underline-offset-2 hover:text-blue-900">${tabColorIndicator(stockLocationColor)}Open in ${escapeHtml(stockLocationTab)}</a>` : ''}
                             ${etOnly ? `<span class="flex max-h-20 flex-wrap gap-1 overflow-y-auto" aria-label="Also available in other ETs">${[...item.sources].sort((a, b) => a.localeCompare(b)).map(sourceEt => `<span title="Also available in ${escapeHtml(sourceEt)}" class="inline-flex max-w-full items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-bold text-indigo-800"><span class="mr-1 text-indigo-400">ET</span><span class="break-all">${escapeHtml(sourceEt)}</span></span>`).join('')}</span>` : ''}
                         </li>`;
                         }).join('')}
@@ -1787,13 +2329,13 @@
                     selectedMissingCreativeCategories.add(category);
                 }
             }
-            renderMissingCreativeFinder();
+            renderMissingCreativeFinderPreservingScroll();
         }
 
         function selectMissingStockAvailability(filter) {
             missingStockAvailabilityFilter = filter === 'missing' ? 'missing' : 'all';
             selectedMissingCreativeCategories.clear();
-            renderMissingCreativeFinder();
+            renderMissingCreativeFinderPreservingScroll();
         }
 
         function openCreativeVersions(encodedName) {
@@ -1806,20 +2348,21 @@
             const sortedVersions = [...family.items].sort((a, b) => a.et.localeCompare(b.et) || a.tab.localeCompare(b.tab));
             document.getElementById('versions-modal-list').innerHTML = sortedVersions.map(item => {
                 const version = item.et.match(/(?:[_\\s-]+)(IMG|ORG)$/i)?.[1]?.toUpperCase() || 'BASE';
-                const statusClass = item.is_done ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700';
+                const isDone = isCreativeDone(item);
+                const statusClass = isDone ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700';
                 return `<div class="grid grid-cols-1 gap-2 border-b border-slate-100 px-2 py-3 last:border-0 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] sm:items-center sm:gap-4 sm:px-3">
                     <span class="min-w-0 break-all font-semibold text-slate-800">${escapeHtml(item.et)}</span>
                     <span class="w-fit rounded-md bg-purple-50 px-2 py-1 text-[10px] font-bold uppercase text-purple-700">${version}</span>
                     <span class="text-sm text-slate-600">${escapeHtml(item.tab)}</span>
                     <span class="text-sm text-slate-500">${escapeHtml(item.date)}</span>
-                    <span class="w-fit rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${statusClass}">${escapeHtml(item.status || 'PENDING')}</span>
+                    <span class="w-fit rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${statusClass}">${escapeHtml(getCreativeStatusLabel(item))}</span>
                 </div>`;
             }).join('');
 
             const modal = document.getElementById('versions-modal');
             modal.classList.remove('hidden');
             modal.classList.add('flex');
-            document.getElementById('versions-modal-close').focus();
+            document.getElementById('versions-modal-close').focus({ preventScroll: true });
         }
 
         function closeCreativeVersions() {
@@ -1833,16 +2376,26 @@
         function renderCreativeVersionFilters(query) {
             const container = document.getElementById('creative-version-filters');
             const normalizedQuery = query.trim().toLowerCase().replace(/[_-]+$/, '');
-            const matchingNames = normalizedQuery
-                ? [...new Set(globalData.map(item => item.et.trim()).filter(name => {
-                    const normalizedName = name.toLowerCase();
-                    return normalizedName === normalizedQuery || normalizedName.startsWith(`${normalizedQuery}_`);
-                }))].sort((a, b) => a.localeCompare(b))
+            const applyDateRange = document.getElementById('creative-finder-date-range').checked;
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+            const matchingItems = normalizedQuery
+                ? globalData.filter(item => {
+                    if (!isTabColorAllowed(item.tab_color)) return false;
+                    const matchesSearch = item.et.toLocaleLowerCase().includes(normalizedQuery)
+                        || item.tab.toLocaleLowerCase().includes(normalizedQuery);
+                    const inDateRange = !applyDateRange
+                        || ((!startDate || item.filter_date >= startDate)
+                            && (!endDate || item.filter_date <= endDate));
+                    return matchesSearch && inDateRange;
+                })
                 : [];
-            const versionTypes = [...new Set(matchingNames.map(name => getCreativeVersionType(name, normalizedQuery)))];
+            const versionTypes = [...new Set(matchingItems.map(item =>
+                getCreativeVersionType(item.et, normalizedQuery)
+            ))];
             versionTypes.sort((a, b) => a === 'CRT_Name' ? -1 : b === 'CRT_Name' ? 1 : a.localeCompare(b));
 
-            if (versionTypes.length < 2 || versionTypes.length > 40) {
+            if (!matchingItems.length) {
                 selectedCreativeVersions.clear();
                 container.innerHTML = '';
                 container.classList.add('hidden');
@@ -1877,7 +2430,7 @@
                 }
             }
             globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
-            renderTable();
+            renderTablePreservingScroll();
         }
 
         async function fetchData() {
@@ -1914,7 +2467,16 @@
                 const newData = result.data;
                 const isDataChanged = JSON.stringify(globalData) !== JSON.stringify(newData);
                 if (isDataChanged) globalData = newData;
-                renderMissingCreativeFinder();
+                try {
+                    localStorage.setItem(SYNC_DATA_CACHE_KEY, JSON.stringify({
+                        localDate: getLocalDateValue(),
+                        savedAt: Date.now(),
+                        data: newData
+                    }));
+                } catch (cacheError) {
+                    console.warn('Could not save synced data for quick reload:', cacheError);
+                }
+                renderMissingCreativeFinderPreservingScroll();
                 loadMissingStockTabs();
                 const freshAuditEventCount = result.audit_tracking
                     ? processAuditEvents(result.audit_events)
@@ -1926,7 +2488,10 @@
                 hasFetchedOnce = true;
                 
                 // Generate datalists for autocomplete
-                const uniqueTabs = [...new Set(globalData.map(item => item.tab))].sort();
+                renderTabColorSettings();
+                const uniqueTabs = [...new Set(globalData
+                    .filter(item => isTabColorAllowed(item.tab_color))
+                    .map(item => item.tab))].sort();
                 const etDatalist = document.getElementById('et-suggestions');
                 if (etDatalist) etDatalist.innerHTML = uniqueTabs.map(t => `<option value="${t.replace(/"/g, '&quot;')}"></option>`).join('');
 
@@ -1939,26 +2504,32 @@
 
                 const tbodyContent = tbody.innerHTML;
                 if (isDataChanged || tbodyContent.includes('An error occurred') || tbodyContent.includes('Ready to fetch')) {
-                    renderTable();
+                    renderTablePreservingScroll();
                 }
 
             } catch (error) {
                 console.error("Sync error:", error);
                 statusBadge.className = 'flex items-center gap-2 bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold tracking-wide border border-red-100';
                 statusIcon.className = 'fa-solid fa-triangle-exclamation text-red-500';
-                statusText.textContent = `Sync Failed: ${error.message}`;
+                statusText.textContent = hasFetchedOnce
+                    ? `Sync Failed: ${error.message} (showing saved data)`
+                    : `Sync Failed: ${error.message}`;
                 
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="4" class="py-32 text-center text-red-500">
-                            <div class="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-red-50 mb-6 shadow-inner border border-red-100">
-                                <i class="fa-solid fa-circle-exclamation text-3xl text-red-400"></i>
-                            </div>
-                            <h3 class="text-xl font-bold tracking-tight text-slate-700">An error occurred</h3>
-                            <p class="text-sm mt-2 text-slate-500 font-medium max-w-lg mx-auto leading-relaxed">${error.message}</p>
-                        </td>
-                    </tr>
-                `;
+                if (!hasFetchedOnce) {
+                    preserveScrollPosition(() => {
+                        tbody.innerHTML = `
+                            <tr>
+                                <td colspan="4" class="py-32 text-center text-red-500">
+                                    <div class="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-red-50 mb-6 shadow-inner border border-red-100">
+                                        <i class="fa-solid fa-circle-exclamation text-3xl text-red-400"></i>
+                                    </div>
+                                    <h3 class="text-xl font-bold tracking-tight text-slate-700">An error occurred</h3>
+                                    <p class="text-sm mt-2 text-slate-500 font-medium max-w-lg mx-auto leading-relaxed">${error.message}</p>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                }
             } finally {
                 btn.disabled = false;
                 syncIcon.className = "fa-solid fa-bolt";
@@ -1982,10 +2553,10 @@
             const applyFinderDateRange = document.getElementById('creative-finder-date-range').checked;
             
             // Filter
-            let filteredData = globalData;
+            let filteredData = globalData.filter(item => isTabColorAllowed(item.tab_color));
             
             if (creativeFinderVal) {
-                filteredData = globalData.filter(item => 
+                filteredData = filteredData.filter(item => 
                     item.tab.toLowerCase().includes(creativeFinderVal) || 
                     item.et.toLowerCase().includes(creativeFinderVal)
                 );
@@ -2004,7 +2575,7 @@
                 }
             } else {
                 // DATE VIEW: Normal date filtering
-                filteredData = globalData.filter(item => {
+                filteredData = filteredData.filter(item => {
                     const rDate = item.filter_date;
                     let inRange = true;
                     if (startDate && rDate < startDate) inRange = false;
@@ -2033,8 +2604,8 @@
             }
             
             // Update Counts
-            const doneItems = filteredData.filter(i => i.is_done);
-            const pendingItems = filteredData.filter(i => !i.is_done);
+            const doneItems = filteredData.filter(isCreativeDone);
+            const pendingItems = filteredData.filter(item => !isCreativeDone(item));
             document.getElementById('count-done').textContent = doneItems.length;
             document.getElementById('count-pending').textContent = pendingItems.length;
 
@@ -2062,7 +2633,7 @@
                 }
                 groupedByET[item.tab].items.push(item);
                 groupedByET[item.tab].total++;
-                if (item.is_done) groupedByET[item.tab].done++;
+                if (isCreativeDone(item)) groupedByET[item.tab].done++;
                 else groupedByET[item.tab].pending++;
             });
 
@@ -2103,11 +2674,12 @@
             
             if (pendingETNames.length > 0) {
                 pendingContainer.classList.remove('hidden');
-                pendingList.innerHTML = pendingETNames.map(et => 
-                    `<span class="bg-amber-50 border border-amber-200 text-amber-700 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider shadow-sm flex items-center gap-1.5 cursor-pointer hover:bg-amber-100 transition-colors" onclick="openETGroup('et-${btoa(unescape(encodeURIComponent(et))).replace(/[^a-zA-Z0-9]/g, '')}', '${et.replace(/'/g, "\\'")}')">
-                        <i class="fa-solid fa-folder-open text-amber-500"></i> ${et}
-                    </span>`
-                ).join('');
+                pendingList.innerHTML = pendingETNames.map(et => {
+                    const tabColor = groupedByET[et].items[0]?.tab_color;
+                    return `<span class="bg-amber-50 border border-amber-200 text-amber-700 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider shadow-sm flex items-center gap-1.5 cursor-pointer hover:bg-amber-100 transition-colors" onclick="openETGroup('et-${btoa(unescape(encodeURIComponent(et))).replace(/[^a-zA-Z0-9]/g, '')}', '${et.replace(/'/g, "\\'")}')">
+                        <i class="fa-solid fa-folder-open text-amber-500"></i> <span${tabColorStyleAttribute(tabColor)}>${escapeHtml(et)}</span>
+                    </span>`;
+                }).join('');
             } else {
                 pendingContainer.classList.add('hidden');
                 pendingList.innerHTML = '';
@@ -2133,6 +2705,7 @@
             let html = "";
             for (const etName of sortedETs) {
                 const group = groupedByET[etName];
+                const etTabColor = group.items[0]?.tab_color;
                 
                 // Create a safe, unique ID for this ET based on its name (handles spaces and brackets)
                 const safeId = "et-" + btoa(unescape(encodeURIComponent(etName))).replace(/[^a-zA-Z0-9]/g, '');
@@ -2147,7 +2720,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="font-black text-blue-900 text-sm tracking-wide uppercase flex items-center">
                                     <i id="icon-${safeId}" class="fa-solid fa-chevron-right text-blue-500 mr-3 transition-transform duration-200 ${iconClass}"></i>
-                                    <i class="fa-solid fa-folder-open text-blue-500 mr-2"></i> ${etName}
+                                    <i class="fa-solid fa-folder-open text-blue-500 mr-2"></i> ${tabColorIndicator(etTabColor)}${escapeHtml(etName)}
                                 </div>
                                 <div class="flex items-center gap-6 text-xs font-bold uppercase tracking-wider bg-white px-4 py-1.5 rounded-lg shadow-sm border border-blue-100/50">
                                     <span class="text-slate-500">Total: ${group.total}</span>
@@ -2163,14 +2736,14 @@
 
                 // Creative Rows for this ET
                 html += group.visibleItems.map(item => `
-                    <tr class="group hover:bg-slate-50/70 transition-colors ${item.is_done ? 'bg-emerald-50/10 hover:bg-emerald-50/40' : ''} ${safeId} ${rowClass}">
+                    <tr class="group hover:bg-slate-50/70 transition-colors ${isCreativeDone(item) ? 'bg-emerald-50/10 hover:bg-emerald-50/40' : ''} ${safeId} ${rowClass}">
                         <td class="py-4 px-8 pl-14 border-l-2 border-transparent group-hover:border-blue-400">
                             <i class="fa-solid fa-turn-up fa-rotate-90 text-slate-300 mr-2"></i>
                             <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Creative</span>
                         </td>
                         <td class="py-4 px-8">
                             <div class="flex min-w-0 flex-wrap items-center gap-2">
-                                <span class="break-all font-bold text-slate-700 text-[14px]">${item.et}</span>
+                                <span${creativeColorStyleAttribute(item.creative_colors)} class="break-all font-bold text-slate-700 text-[14px]">${escapeHtml(item.et)}</span>
                             </div>
                         </td>
                         <td class="py-4 px-8">
@@ -2184,8 +2757,8 @@
                             </div>
                         </td>
                         <td class="py-4 px-8 text-right">
-                            ${item.is_done 
-                                ? `<span class="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider shadow-sm"><i class="fa-solid fa-check"></i> Done</span>`
+                            ${isCreativeDone(item)
+                                ? `<span class="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider shadow-sm"><i class="fa-solid fa-check"></i> ${escapeHtml(getCreativeStatusLabel(item))}</span>`
                                 : `<span class="inline-flex items-center gap-1.5 bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider shadow-sm"><i class="fa-solid fa-circle-notch fa-spin text-amber-500"></i> ${item.status || "PENDING"}</span>`
                             }
                         </td>
@@ -2200,16 +2773,36 @@
             creativeSuggestionsSuppressed = false;
             selectedCreativeVersions.clear();
             globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
-            renderTable();
+            const hasQuery = Boolean(document.getElementById('creative-finder').value.trim());
+            const clearButton = document.getElementById('creative-finder-clear');
+            clearButton.style.display = hasQuery ? 'inline-flex' : 'none';
+            renderTablePreservingScroll();
+        }
+
+        function clearCreativeFinder() {
+            const finder = document.getElementById('creative-finder');
+            finder.value = '';
+            creativeSuggestionsSuppressed = false;
+            selectedCreativeVersions.clear();
+            globalSearchLimit = GLOBAL_SEARCH_PAGE_SIZE;
+            const clearButton = document.getElementById('creative-finder-clear');
+            clearButton.style.display = 'none';
+            closeCreativeSuggestions();
+            renderTablePreservingScroll();
+            finder.focus({ preventScroll: true });
         }
 
         function showMoreGlobalSearchResults() {
             globalSearchLimit += GLOBAL_SEARCH_PAGE_SIZE;
-            renderTable();
+            renderTablePreservingScroll();
         }
 
         // Toggles visibility of items within an ET group
         function toggleGroup(safeId, etName) {
+            preserveScrollPosition(() => toggleGroupRows(safeId, etName));
+        }
+
+        function toggleGroupRows(safeId, etName) {
             const rows = document.querySelectorAll('.' + safeId);
             const icon = document.getElementById('icon-' + safeId);
             
@@ -2235,7 +2828,7 @@
             if (rows.length === 0) return;
 
             if (rows[0].classList.contains('hidden')) {
-                toggleGroup(safeId, etName);
+                toggleGroupRows(safeId, etName);
             }
             const groupHeader = document.getElementById('header-' + safeId);
             if (groupHeader) {
@@ -2264,6 +2857,36 @@
             openETGroup(safeId, etName);
         }
 
+        function restoreCachedSyncData() {
+            try {
+                const cached = JSON.parse(localStorage.getItem(SYNC_DATA_CACHE_KEY) || 'null');
+                if (
+                    !cached
+                    || cached.localDate !== getLocalDateValue()
+                    || !Array.isArray(cached.data)
+                ) return;
+
+                globalData = cached.data;
+                hasFetchedOnce = true;
+                rebuildCreativeVersionIndex();
+                renderTabColorSettings();
+                renderTablePreservingScroll();
+                renderMissingCreativeFinderPreservingScroll();
+
+                const savedTime = new Date(cached.savedAt).toLocaleTimeString([], { hour12: true });
+                const statusBadge = document.getElementById('status-badge');
+                const statusIcon = document.getElementById('status-icon');
+                statusBadge.className = 'flex items-center gap-2 bg-slate-50 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold tracking-wide border border-slate-200';
+                statusIcon.className = 'fa-solid fa-clock text-slate-500';
+                document.getElementById('status-text').textContent = `Showing saved data from ${savedTime}`;
+            } catch (error) {
+                console.warn('Could not restore saved sync data:', error);
+            }
+        }
+
+        restoreCachedSyncData();
+        loadAdminConfiguration();
+        setInterval(loadAdminConfiguration, 30000);
         setInterval(() => {
             if (!isFetchingData) fetchData();
         }, AUTO_SYNC_INTERVAL_MS);

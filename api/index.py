@@ -1,13 +1,21 @@
 from flask import Flask, jsonify, request, send_from_directory
 import urllib.request
 import json
+import gzip
 import time
+import base64
+import hmac
 import io
 import hashlib
+import posixpath
+import zipfile
+import xml.etree.ElementTree as ET
 from datetime import date, datetime
 import os
 import random
 import re
+import secrets
+import threading
 from urllib.parse import urlparse
 
 from python_calamine import CalamineWorkbook
@@ -28,7 +36,7 @@ cache = {
     "last_raw_excel": None,
     "local_date": None
 }
-CACHE_DURATION = 5
+CACHE_DURATION = 15
 MISSING_STOCK_CACHE_DURATION = 300
 missing_stock_cache = {"timestamp": 0, "tabs": [], "entries": {}}
 SHEET_GID_PATTERN = re.compile(
@@ -41,11 +49,281 @@ PUSH_SUBSCRIPTIONS_KEY = "creative-report:push:subscriptions"
 PUSH_SNAPSHOT_KEY = "creative-report:push:last-snapshot"
 PUSH_CHECK_INTERVAL_SECONDS = 30
 push_check_cache = {"checked_at": 0}
+ADMIN_SETTINGS_KEY = "creative-report:admin:settings"
+ADMIN_COOKIE_NAME = "creative_admin_session"
+ADMIN_SESSION_SECONDS = 4 * 60 * 60
+ADMIN_PASSWORD_HASH_ITERATIONS = 600_000
+ADMIN_PASSWORD_MIN_LENGTH = 12
+admin_login_attempts = {}
+admin_login_lock = threading.Lock()
+
+
+@app.after_request
+def compress_sync_response(response):
+    if (
+        request.path != "/api/sync"
+        or response.status_code != 200
+        or response.headers.get("Content-Encoding")
+        or request.accept_encodings.quality("gzip") <= 0
+    ):
+        return response
+
+    response_body = response.get_data()
+    if len(response_body) <= 1024:
+        return response
+
+    response.set_data(gzip.compress(response_body, compresslevel=5, mtime=0))
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Vary"] = "Accept-Encoding"
+    return response
 
 
 @app.route("/api/push/config", methods=["GET"])
 def get_push_config():
     return jsonify(push_configuration())
+
+
+@app.route("/api/admin/config", methods=["GET", "POST", "PUT"])
+def admin_config():
+    if request.method != "GET" and not request.is_json:
+        response = jsonify({"success": False, "error": "Expected a JSON request."})
+        response.headers["Cache-Control"] = "no-store"
+        return response, 400
+    payload = request.get_json(silent=True) if request.method != "GET" else {}
+    if not isinstance(payload, dict):
+        response = jsonify({"success": False, "error": "Expected a JSON object."})
+        response.headers["Cache-Control"] = "no-store"
+        return response, 400
+
+    try:
+        status, result, token = admin_api_request(
+            request.method,
+            payload,
+            request.cookies.get(ADMIN_COOKIE_NAME, ""),
+            request.remote_addr or ""
+        )
+    except RuntimeError as error:
+        print(f"Admin settings request failed: {error}")
+        response = jsonify({"success": False, "error": str(error)})
+        response.headers["Cache-Control"] = "no-store"
+        return response, 503
+
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    if token == "clear":
+        response.delete_cookie(ADMIN_COOKIE_NAME, path="/", httponly=True, samesite="Lax")
+    elif token:
+        forwarded_proto = request.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip()
+        response.set_cookie(
+            ADMIN_COOKIE_NAME,
+            token,
+            max_age=ADMIN_SESSION_SECONDS,
+            httponly=True,
+            secure=request.is_secure or forwarded_proto == "https",
+            samesite="Lax",
+            path="/"
+        )
+    return response, status
+
+
+def get_admin_settings():
+    if os.environ.get("UPSTASH_REDIS_REST_URL") and os.environ.get("UPSTASH_REDIS_REST_TOKEN"):
+        stored = upstash_command("GET", ADMIN_SETTINGS_KEY)
+        if stored:
+            try:
+                settings = json.loads(stored)
+            except (TypeError, ValueError) as error:
+                raise RuntimeError("Stored admin settings are invalid.") from error
+            if not isinstance(settings, dict) or not isinstance(settings.get("color_settings_enabled"), bool):
+                raise RuntimeError("Stored admin settings have an invalid format.")
+            return settings
+        return {"color_settings_enabled": True}
+
+    if os.environ.get("VERCEL"):
+        raise RuntimeError("Persistent admin settings require UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.")
+
+    settings_path = os.environ.get(
+        "ADMIN_SETTINGS_FILE",
+        os.path.join(ROOT_DIR, "admin_settings.json")
+    )
+    if not os.path.exists(settings_path):
+        return {"color_settings_enabled": True}
+    try:
+        with open(settings_path, "r", encoding="utf-8") as settings_file:
+            settings = json.load(settings_file)
+    except (OSError, ValueError) as error:
+        raise RuntimeError("Could not read the saved admin settings.") from error
+    if not isinstance(settings, dict) or not isinstance(settings.get("color_settings_enabled"), bool):
+        raise RuntimeError("Stored admin settings have an invalid format.")
+    return settings
+
+
+def save_admin_settings(settings):
+    if os.environ.get("UPSTASH_REDIS_REST_URL") and os.environ.get("UPSTASH_REDIS_REST_TOKEN"):
+        upstash_command("SET", ADMIN_SETTINGS_KEY, json.dumps(settings))
+        return
+    if os.environ.get("VERCEL"):
+        raise RuntimeError("Persistent admin settings require UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.")
+
+    settings_path = os.environ.get(
+        "ADMIN_SETTINGS_FILE",
+        os.path.join(ROOT_DIR, "admin_settings.json")
+    )
+    try:
+        with open(settings_path, "w", encoding="utf-8") as settings_file:
+            json.dump(settings, settings_file, indent=2)
+    except OSError as error:
+        raise RuntimeError("Could not save the admin settings.") from error
+
+
+def get_admin_session_secret(settings):
+    password_hash = settings.get("admin_password_hash")
+    password_salt = settings.get("admin_password_salt")
+    if password_hash is not None or password_salt is not None:
+        if (
+            not isinstance(password_hash, str)
+            or not isinstance(password_salt, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", password_hash)
+            or not re.fullmatch(r"[0-9a-f]{32}", password_salt)
+        ):
+            raise RuntimeError("Stored admin credentials have an invalid format.")
+        return bytes.fromhex(password_hash)
+    password = os.environ.get("ADMIN_PASSWORD", "")
+    return password.encode("utf-8") if password else b""
+
+
+def verify_admin_password(password, settings):
+    password_hash = settings.get("admin_password_hash")
+    password_salt = settings.get("admin_password_salt")
+    if password_hash is not None or password_salt is not None:
+        if (
+            not isinstance(password_hash, str)
+            or not isinstance(password_salt, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", password_hash)
+            or not re.fullmatch(r"[0-9a-f]{32}", password_salt)
+        ):
+            raise RuntimeError("Stored admin credentials have an invalid format.")
+        derived_hash = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            bytes.fromhex(password_salt),
+            ADMIN_PASSWORD_HASH_ITERATIONS
+        )
+        return hmac.compare_digest(derived_hash, bytes.fromhex(password_hash))
+    configured_password = os.environ.get("ADMIN_PASSWORD", "")
+    return bool(configured_password) and hmac.compare_digest(
+        password.encode("utf-8"),
+        configured_password.encode("utf-8")
+    )
+
+
+def hash_admin_password(password):
+    salt = secrets.token_bytes(16)
+    password_hash = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        ADMIN_PASSWORD_HASH_ITERATIONS
+    )
+    return {
+        "admin_password_salt": salt.hex(),
+        "admin_password_hash": password_hash.hex()
+    }
+
+
+def create_admin_session_token(session_secret):
+    expires_at = int(time.time()) + ADMIN_SESSION_SECONDS
+    payload = str(expires_at)
+    signature = hmac.new(session_secret, payload.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{payload}.{signature}"
+
+
+def is_valid_admin_session(token, settings):
+    session_secret = get_admin_session_secret(settings)
+    if not session_secret or not token:
+        return False
+    try:
+        expires_text, signature = token.split(".", 1)
+        expires_at = int(expires_text)
+    except (ValueError, TypeError):
+        return False
+    if expires_at <= time.time() or expires_at > time.time() + ADMIN_SESSION_SECONDS:
+        return False
+    expected_signature = hmac.new(session_secret, expires_text.encode("ascii"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, expected_signature)
+
+
+def admin_api_request(method, payload=None, session_token="", remote_address=""):
+    if method == "GET":
+        settings = get_admin_settings()
+        session_secret = get_admin_session_secret(settings)
+        return 200, {
+            "color_settings_enabled": settings["color_settings_enabled"],
+            "authenticated": is_valid_admin_session(session_token, settings),
+            "password_configured": bool(session_secret)
+        }, None
+
+    if method == "POST":
+        if payload.get("action") == "logout":
+            return 200, {"success": True}, "clear"
+        settings = get_admin_settings()
+        if payload.get("action") == "change_password":
+            if not is_valid_admin_session(session_token, settings):
+                return 401, {"success": False, "error": "Admin sign-in is required."}, None
+            new_password = payload.get("new_password")
+            confirm_password = payload.get("confirm_password")
+            if not isinstance(new_password, str) or not isinstance(confirm_password, str):
+                return 400, {"success": False, "error": "Enter and confirm the new password."}, None
+            if len(new_password) < ADMIN_PASSWORD_MIN_LENGTH:
+                return 400, {
+                    "success": False,
+                    "error": f"New password must be at least {ADMIN_PASSWORD_MIN_LENGTH} characters."
+                }, None
+            if len(new_password) > 1024:
+                return 400, {"success": False, "error": "New password is too long."}, None
+            if not hmac.compare_digest(new_password.encode("utf-8"), confirm_password.encode("utf-8")):
+                return 400, {"success": False, "error": "New passwords do not match."}, None
+            settings.update(hash_admin_password(new_password))
+            save_admin_settings(settings)
+            session_secret = get_admin_session_secret(settings)
+            return 200, {"success": True}, create_admin_session_token(session_secret)
+
+        supplied_password = payload.get("password")
+        if not get_admin_session_secret(settings):
+            return 503, {"success": False, "error": "Admin access is not configured. Set the ADMIN_PASSWORD environment variable."}, None
+        if not isinstance(supplied_password, str):
+            return 400, {"success": False, "error": "Enter the admin password."}, None
+
+        now = time.time()
+        with admin_login_lock:
+            attempts = [attempt for attempt in admin_login_attempts.get(remote_address, []) if now - attempt < 300]
+            if len(attempts) >= 5:
+                admin_login_attempts[remote_address] = attempts
+                return 429, {"success": False, "error": "Too many password attempts. Wait five minutes and try again."}, None
+            if not verify_admin_password(supplied_password, settings):
+                attempts.append(now)
+                admin_login_attempts[remote_address] = attempts
+                return 401, {"success": False, "error": "Incorrect admin password."}, None
+            admin_login_attempts.pop(remote_address, None)
+        session_secret = get_admin_session_secret(settings)
+        return 200, {
+            "success": True,
+            "color_settings_enabled": settings["color_settings_enabled"],
+            "authenticated": True
+        }, create_admin_session_token(session_secret)
+
+    if method == "PUT":
+        settings = get_admin_settings()
+        if not is_valid_admin_session(session_token, settings):
+            return 401, {"success": False, "error": "Admin sign-in is required."}, None
+        enabled = payload.get("color_settings_enabled")
+        if not isinstance(enabled, bool):
+            return 400, {"success": False, "error": "color_settings_enabled must be true or false."}, None
+        settings["color_settings_enabled"] = enabled
+        save_admin_settings(settings)
+        return 200, {"success": True, "color_settings_enabled": enabled}, None
+
+    return 405, {"success": False, "error": "Method not allowed."}, None
 
 
 def spreadsheet_column_name(column_index):
@@ -59,6 +337,11 @@ def spreadsheet_column_name(column_index):
 
 def cell_text(value):
     return str(value).strip() if value is not None else ""
+
+
+def is_completed_status(status):
+    normalized_status = status.strip().upper()
+    return "DONE" in normalized_status or "IGNORE" in normalized_status or normalized_status == "Y"
 
 
 def is_stock_creative(value):
@@ -163,6 +446,111 @@ def parse_stock_sheet(sheet_name, rows, gid):
     return entries
 
 
+def extract_sheet_tab_colors(workbook_data):
+    spreadsheet_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    relationship_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    package_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    colors = {}
+
+    with zipfile.ZipFile(io.BytesIO(workbook_data)) as archive:
+        workbook_root = ET.fromstring(archive.read("xl/workbook.xml"))
+        relationships_root = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        relationships = {
+            relationship.get("Id"): relationship.get("Target")
+            for relationship in relationships_root.findall(f"{{{package_ns}}}Relationship")
+        }
+
+        for sheet in workbook_root.findall(f"./{{{spreadsheet_ns}}}sheets/{{{spreadsheet_ns}}}sheet"):
+            sheet_name = sheet.get("name")
+            relationship_id = sheet.get(f"{{{relationship_ns}}}id")
+            target = relationships.get(relationship_id)
+            if not sheet_name or not target:
+                continue
+            sheet_path = (
+                target.lstrip("/")
+                if target.startswith("/")
+                else posixpath.normpath(posixpath.join("xl", target))
+            )
+            sheet_root = ET.fromstring(archive.read(sheet_path))
+            tab_color = sheet_root.find(
+                f"./{{{spreadsheet_ns}}}sheetPr/{{{spreadsheet_ns}}}tabColor"
+            )
+            rgb = tab_color.get("rgb", "") if tab_color is not None else ""
+            if re.fullmatch(r"(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})", rgb):
+                colors[sheet_name] = f"#{rgb[-6:]}"
+
+    return colors
+
+
+def extract_sheet_cell_colors(workbook_data):
+    spreadsheet_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    relationship_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    package_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    indexed_colors = {
+        "10": "#FF0000",
+        "11": "#00FF00",
+        "12": "#0000FF",
+        "13": "#FFFF00",
+        "14": "#FF00FF",
+        "15": "#00FFFF"
+    }
+    cell_colors = {}
+
+    with zipfile.ZipFile(io.BytesIO(workbook_data)) as archive:
+        workbook_root = ET.fromstring(archive.read("xl/workbook.xml"))
+        relationships_root = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        relationships = {
+            relationship.get("Id"): relationship.get("Target")
+            for relationship in relationships_root.findall(f"{{{package_ns}}}Relationship")
+        }
+        if "xl/styles.xml" not in archive.namelist():
+            return {}
+        styles_root = ET.fromstring(archive.read("xl/styles.xml"))
+        fills = styles_root.find(f"{{{spreadsheet_ns}}}fills")
+        cell_xfs = styles_root.find(f"{{{spreadsheet_ns}}}cellXfs")
+        style_colors = []
+
+        for style in cell_xfs or ():
+            fill_index = int(style.get("fillId", "0"))
+            colors = []
+            if fills is not None and fill_index < len(fills):
+                color_element = fills[fill_index].find(
+                    f"./{{{spreadsheet_ns}}}patternFill/{{{spreadsheet_ns}}}fgColor"
+                )
+                if color_element is not None:
+                    rgb = color_element.get("rgb", "")
+                    if re.fullmatch(r"(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})", rgb):
+                        color = f"#{rgb[-6:].upper()}"
+                    else:
+                        color = indexed_colors.get(color_element.get("indexed", ""))
+                    if color:
+                        colors.append(color)
+            style_colors.append(colors)
+
+        for sheet in workbook_root.findall(f"./{{{spreadsheet_ns}}}sheets/{{{spreadsheet_ns}}}sheet"):
+            sheet_name = sheet.get("name")
+            target = relationships.get(sheet.get(f"{{{relationship_ns}}}id"))
+            if not sheet_name or not target:
+                continue
+            sheet_path = (
+                target.lstrip("/")
+                if target.startswith("/")
+                else posixpath.normpath(posixpath.join("xl", target))
+            )
+            sheet_root = ET.fromstring(archive.read(sheet_path))
+            colors_by_cell = {}
+            for cell in sheet_root.findall(f".//{{{spreadsheet_ns}}}c"):
+                style_index = int(cell.get("s", "0"))
+                if style_index >= len(style_colors):
+                    continue
+                colors = style_colors[style_index]
+                if colors:
+                    colors_by_cell[cell.get("r", "")] = colors
+            cell_colors[sheet_name] = colors_by_cell
+
+    return cell_colors
+
+
 def load_missing_stock():
     current_time = time.time()
     if (
@@ -181,6 +569,8 @@ def load_missing_stock():
     if not workbook_data.startswith(b"PK"):
         raise RuntimeError("The linked stock spreadsheet did not return an Excel workbook.")
     workbook = CalamineWorkbook.from_filelike(io.BytesIO(workbook_data))
+    tab_colors = extract_sheet_tab_colors(workbook_data)
+    cell_colors = extract_sheet_cell_colors(workbook_data)
 
     metadata_request = urllib.request.Request(
         f"{MISSING_STOCK_SHEET_URL}?usp=sharing",
@@ -200,8 +590,14 @@ def load_missing_stock():
     for sheet_name in workbook.sheet_names:
         rows = workbook.get_sheet_by_name(sheet_name).to_python()
         entries = parse_stock_sheet(sheet_name, rows, gids[sheet_name])
+        for entry in entries:
+            entry["creative_colors"] = cell_colors.get(sheet_name, {}).get(entry["cell"], [])
         entries_by_tab[sheet_name] = entries
-        tabs.append({"name": sheet_name, "creative_count": len(entries)})
+        tabs.append({
+            "name": sheet_name,
+            "creative_count": len(entries),
+            "tab_color": tab_colors.get(sheet_name)
+        })
 
     missing_stock_cache.update({
         "timestamp": current_time,
@@ -216,6 +612,23 @@ def get_missing_stock():
     try:
         stock = load_missing_stock()
         tab_name = request.args.get("tab", "").strip()
+        tabs_by_name = {tab["name"]: tab for tab in stock["tabs"]}
+        if request.args.get("all_tabs") == "true":
+            entries = [
+                {
+                    **entry,
+                    "stock_tab": name,
+                    "stock_tab_color": tabs_by_name[name]["tab_color"]
+                }
+                for name, tab_entries in stock["entries"].items()
+                for entry in tab_entries
+            ]
+            return jsonify({
+                "success": True,
+                "tab": "All stock tabs",
+                "sheet_url": MISSING_STOCK_SHEET_URL,
+                "entries": entries
+            })
         if not tab_name:
             return jsonify({
                 "success": True,
@@ -228,7 +641,14 @@ def get_missing_stock():
             "success": True,
             "tab": tab_name,
             "sheet_url": MISSING_STOCK_SHEET_URL,
-            "entries": stock["entries"][tab_name]
+            "entries": [
+                {
+                    **entry,
+                    "stock_tab": tab_name,
+                    "stock_tab_color": tabs_by_name[tab_name]["tab_color"]
+                }
+                for entry in stock["entries"][tab_name]
+            ]
         })
     except Exception as error:
         print(f"Could not load missing-creative stock sheet: {error}")
@@ -638,6 +1058,8 @@ def sync_data():
                 raise Exception(f"Failed to fetch from Google Sheets: {fetch_error}")
 
         wb = CalamineWorkbook.from_filelike(io.BytesIO(excel_data))
+        tab_colors = extract_sheet_tab_colors(excel_data)
+        cell_colors = extract_sheet_cell_colors(excel_data)
         
         history = load_history()
         history_dirty = False
@@ -768,8 +1190,7 @@ def sync_data():
                         filter_date_str = "1970-01-01"
                         
                 raw_status_str = str(raw_status).strip() if raw_status is not None and str(raw_status).strip() else "PENDING/BLANK"
-                status_upper = raw_status_str.upper()
-                is_done = ("DONE" in status_upper or status_upper == "Y")
+                is_done = is_completed_status(raw_status_str)
                 
                 results.append({
                     "tab": tab_name_str,
@@ -779,7 +1200,11 @@ def sync_data():
                     "et": et_name_str,
                     "status": raw_status_str,
                     "is_done": is_done,
-                    "discovered_at": discovered_display
+                    "discovered_at": discovered_display,
+                    "tab_color": tab_colors.get(tab_name_str),
+                    "creative_colors": cell_colors.get(tab_name_str, {}).get(
+                        f"{spreadsheet_column_name(creative_col_idx)}{row_number}", []
+                    )
                 })
                 
         if history_dirty:
@@ -803,7 +1228,7 @@ def sync_data():
         cache["data"] = results
         cache["audit_events"] = audit_events[-1000:]
         cache["audit_tracking"] = audit_tracking
-        cache["timestamp"] = current_time
+        cache["timestamp"] = time.time()
         cache["local_date"] = client_today.isoformat()
 
         return jsonify({
