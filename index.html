@@ -122,7 +122,7 @@
                         <span class="hidden text-xs font-bold sm:inline">Admin Access</span>
                     </button>
 
-                    <div id="tab-color-settings" class="relative shrink-0">
+                    <div id="tab-color-settings" class="relative shrink-0 hidden">
                         <button type="button" id="tab-color-settings-toggle" onclick="toggleTabColorSettings()" aria-label="Color settings" aria-expanded="false" aria-controls="tab-color-settings-panel" title="Color settings" class="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-100">
                             <i class="fa-solid fa-palette" aria-hidden="true"></i>
                         </button>
@@ -166,7 +166,10 @@
                 <!-- ET Filter Box (Respects Date) -->
                 <div class="flex w-full min-w-0 items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-2.5 transition-all focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-50 sm:max-w-sm sm:flex-1">
                     <i class="fa-solid fa-filter text-slate-400 text-sm"></i>
-                    <input type="text" id="search-et" list="et-suggestions" placeholder="Filter ETs..." class="bg-transparent border-none p-0 text-sm font-medium text-slate-700 placeholder-slate-400 focus:outline-none w-full" onkeyup="renderTablePreservingScroll()" onchange="renderTablePreservingScroll()">
+                    <input type="text" id="search-et" list="et-suggestions" placeholder="Filter ETs..." class="bg-transparent border-none p-0 text-sm font-medium text-slate-700 placeholder-slate-400 focus:outline-none w-full" oninput="renderTablePreservingScroll(); updateInputClearButton(this)">
+                    <button type="button" id="search-et-clear" onclick="clearInputField('search-et')" style="display:none" class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300" aria-label="Clear ET filter" title="Clear search">
+                        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                    </button>
                     <datalist id="et-suggestions"></datalist>
                 </div>
 
@@ -203,21 +206,43 @@
                         </span>
                     </button>
                     <div id="missing-creative-panel" class="hidden gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.7fr)] sm:p-6">
-                        <label class="block min-w-0">
-                            <span class="mb-1.5 block text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Creative or campaign name</span>
-                            <input id="missing-creative-query" type="search" autocomplete="off" placeholder="Type a creative or campaign name..." oninput="handleMissingCreativeQueryInput()" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
+                        <label class="block min-w-0 sm:col-span-2">
+                            <span class="mb-1.5 block text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Search</span>
+                            <span class="flex flex-col gap-2 sm:flex-row">
+                                <select id="missing-search-type" aria-label="Search by" onchange="handleMissingCreativeSearchTypeChange()" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100 sm:w-48">
+                                    <option value="creative">Creative name</option>
+                                    <option value="campaign">Campaign name</option>
+                                </select>
+                                <span class="relative flex min-w-0 flex-1 items-center">
+                                    <input id="missing-creative-query" type="search" autocomplete="off" placeholder="Type creative-name keywords..." onfocus="refreshMissingCampaignSuggestions()" oninput="handleMissingCreativeQueryInput(); updateInputClearButton(this)" class="w-full rounded-xl border border-slate-200 bg-white py-3 pl-3 pr-10 text-sm font-medium text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
+                                    <button type="button" id="missing-creative-query-clear" onclick="clearInputField('missing-creative-query')" style="display:none" class="absolute right-2 inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-cyan-300" aria-label="Clear creative or campaign search" title="Clear search">
+                                        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                                    </button>
+                                </span>
+                                <datalist id="missing-campaign-suggestions"></datalist>
+                            </span>
                         </label>
                         <label class="block min-w-0">
                             <span class="mb-1.5 block text-[10px] font-extrabold uppercase tracking-widest text-slate-500">ET to check</span>
-                            <select id="missing-creative-target" onchange="renderMissingCreativeFinderPreservingScroll()" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
-                                <option value="">Sync data to choose an ET</option>
-                            </select>
+                            <span class="relative flex items-center">
+                                <select id="missing-creative-target" onchange="renderMissingCreativeFinderPreservingScroll(); updateInputClearButton(this)" class="w-full rounded-xl border border-slate-200 bg-white py-3 pl-3 pr-10 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
+                                    <option value="">Sync data to choose an ET</option>
+                                </select>
+                                <button type="button" id="missing-creative-target-clear" onclick="clearInputField('missing-creative-target')" style="display:none" class="absolute right-2 inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-cyan-300" aria-label="Clear ET selection" title="Clear ET selection">
+                                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                                </button>
+                            </span>
                         </label>
                         <label class="block min-w-0 sm:col-span-2">
                             <span class="mb-1.5 block text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Stock spreadsheet tab</span>
-                            <select id="missing-stock-tab" onchange="handleMissingStockTabChange()" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
-                                <option value="">Load stock-sheet tabs...</option>
-                            </select>
+                            <span class="relative flex items-center">
+                                <select id="missing-stock-tab" onchange="handleMissingStockTabChange(); updateInputClearButton(this)" class="w-full rounded-xl border border-slate-200 bg-white py-3 pl-3 pr-10 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
+                                    <option value="">Load stock-sheet tabs...</option>
+                                </select>
+                                <button type="button" id="missing-stock-tab-clear" onclick="clearInputField('missing-stock-tab')" style="display:none" class="absolute right-2 inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-cyan-300" aria-label="Clear stock-tab selection" title="Clear stock-tab selection">
+                                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                                </button>
+                            </span>
                         </label>
                         <div class="flex justify-end sm:col-span-2">
                             <button type="button" onclick="clearMissingCreativeFilters()" class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-900 focus:outline-none focus:ring-4 focus:ring-cyan-100">
@@ -358,7 +383,12 @@
             <div id="admin-login-panel" class="p-5">
                 <form id="admin-login-form" onsubmit="submitAdminLogin(event)" class="space-y-4">
                     <label for="admin-password" class="block text-xs font-bold text-slate-700">Admin password</label>
-                    <input id="admin-password" type="password" autocomplete="current-password" required class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50" placeholder="Enter admin password">
+                    <span class="relative flex items-center">
+                        <input id="admin-password" type="password" autocomplete="current-password" required class="w-full rounded-xl border border-slate-200 py-2.5 pl-3 pr-10 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50" placeholder="Enter admin password" oninput="updateInputClearButton(this)">
+                        <button type="button" id="admin-password-clear" onclick="clearInputField('admin-password')" style="display:none" class="absolute right-2 inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300" aria-label="Clear admin password" title="Clear input">
+                            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                        </button>
+                    </span>
                     <p id="admin-login-error" class="hidden rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700" role="alert"></p>
                     <button type="submit" id="admin-login-submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-slate-800">
                         <i class="fa-solid fa-lock" aria-hidden="true"></i> Sign in
@@ -388,9 +418,19 @@
                     <form id="admin-change-password-form" onsubmit="changeAdminPassword(event)" class="space-y-3">
                         <h3 class="text-sm font-bold text-slate-800">Change admin password</h3>
                         <label for="admin-new-password" class="block text-xs font-bold text-slate-700">New password</label>
-                        <input id="admin-new-password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50" placeholder="At least 12 characters">
+                        <span class="relative flex items-center">
+                            <input id="admin-new-password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required class="w-full rounded-xl border border-slate-200 py-2.5 pl-3 pr-10 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50" placeholder="At least 12 characters" oninput="updateInputClearButton(this)">
+                            <button type="button" id="admin-new-password-clear" onclick="clearInputField('admin-new-password')" style="display:none" class="absolute right-2 inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300" aria-label="Clear new admin password" title="Clear input">
+                                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                            </button>
+                        </span>
                         <label for="admin-confirm-password" class="block text-xs font-bold text-slate-700">Confirm new password</label>
-                        <input id="admin-confirm-password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50" placeholder="Enter it again">
+                        <span class="relative flex items-center">
+                            <input id="admin-confirm-password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required class="w-full rounded-xl border border-slate-200 py-2.5 pl-3 pr-10 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50" placeholder="Enter it again" oninput="updateInputClearButton(this)">
+                            <button type="button" id="admin-confirm-password-clear" onclick="clearInputField('admin-confirm-password')" style="display:none" class="absolute right-2 inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300" aria-label="Clear confirm admin password" title="Clear input">
+                                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                            </button>
+                        </span>
                         <button type="submit" id="admin-change-password-submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-slate-800">
                             <i class="fa-solid fa-key" aria-hidden="true"></i> Update password
                         </button>
@@ -453,6 +493,8 @@
         let selectedMissingCreativeCategories = new Set();
         let missingStockAvailabilityFilter = 'all';
         let missingStockTabs = [];
+        let missingCampaignSuggestions = [];
+        let missingCampaignSuggestionRefresh = null;
         let missingStockEntries = [];
         let missingStockSheetUrl = '';
         let missingStockError = '';
@@ -1671,7 +1713,7 @@
         function setColorSettingsAvailable(enabled) {
             adminColorSettingsEnabled = Boolean(enabled);
             const colorSettings = document.getElementById('tab-color-settings');
-            if (colorSettings) colorSettings.classList.toggle('hidden', !adminColorSettingsEnabled);
+            if (colorSettings) colorSettings.classList.toggle('hidden', !adminColorSettingsEnabled || !adminAuthenticated);
         }
 
         async function requestAdminConfig(method = 'GET', payload = {}) {
@@ -1693,8 +1735,8 @@
         async function loadAdminConfiguration() {
             try {
                 const settings = await requestAdminConfig();
-                setColorSettingsAvailable(settings.color_settings_enabled);
                 adminAuthenticated = settings.authenticated === true;
+                setColorSettingsAvailable(settings.color_settings_enabled);
                 adminConfigurationError = '';
             } catch (error) {
                 adminConfigurationError = error.message;
@@ -1722,6 +1764,7 @@
 
         function showAdminAccessPanel(isAuthenticated) {
             adminAuthenticated = isAuthenticated;
+            setColorSettingsAvailable(adminColorSettingsEnabled);
             document.getElementById('admin-login-panel').classList.toggle('hidden', isAuthenticated);
             document.getElementById('admin-settings-panel').classList.toggle('hidden', !isAuthenticated);
             if (isAuthenticated) {
@@ -2000,6 +2043,7 @@
                 const result = await response.json();
                 if (!response.ok || !result.success) throw new Error(result.error || `Stock sheet request failed (${response.status}).`);
                 missingStockTabs = result.tabs || [];
+                updateMissingCampaignSuggestions(result.campaign_codes || []);
                 missingStockSheetUrl = result.sheet_url || '';
                 renderMissingStockTabOptions();
                 selector.value = '';
@@ -2012,6 +2056,56 @@
                 selector.innerHTML = '<option value="">Stock-sheet tabs unavailable</option>';
                 renderMissingCreativeFinderPreservingScroll();
             }
+        }
+
+        function renderMissingCampaignSuggestions() {
+            const suggestions = document.getElementById('missing-campaign-suggestions');
+            if (!suggestions) return;
+            suggestions.innerHTML = missingCampaignSuggestions
+                .map(code => `<option value="${escapeHtml(code)}"></option>`)
+                .join('');
+        }
+
+        function updateMissingCampaignSuggestions(codes) {
+            missingCampaignSuggestions = [...new Set([
+                ...missingCampaignSuggestions,
+                ...codes.filter(code => typeof code === 'string' && code.trim())
+            ])].sort((a, b) => a.localeCompare(b));
+            renderMissingCampaignSuggestions();
+        }
+
+        async function refreshMissingCampaignSuggestions() {
+            if (document.getElementById('missing-search-type').value !== 'campaign') return;
+            if (missingCampaignSuggestionRefresh) return missingCampaignSuggestionRefresh;
+            missingCampaignSuggestionRefresh = (async () => {
+                try {
+                    const response = await fetch('/api/missing-stock');
+                    const result = await response.json();
+                    if (!response.ok || !result.success) {
+                        throw new Error(result.error || `Campaign suggestion request failed (${response.status}).`);
+                    }
+                    updateMissingCampaignSuggestions(result.campaign_codes || []);
+                } catch (error) {
+                    console.warn('Could not refresh campaign-name suggestions:', error);
+                } finally {
+                    missingCampaignSuggestionRefresh = null;
+                }
+            })();
+            return missingCampaignSuggestionRefresh;
+        }
+
+        function handleMissingCreativeSearchTypeChange() {
+            const searchType = document.getElementById('missing-search-type').value;
+            const queryInput = document.getElementById('missing-creative-query');
+            if (searchType === 'campaign') {
+                queryInput.setAttribute('list', 'missing-campaign-suggestions');
+                queryInput.placeholder = 'Choose or type an exact campaign code/name...';
+                refreshMissingCampaignSuggestions();
+            } else {
+                queryInput.removeAttribute('list');
+                queryInput.placeholder = 'Type creative-name keywords...';
+            }
+            handleMissingCreativeQueryInput();
         }
 
         async function handleMissingStockTabChange() {
@@ -2037,6 +2131,7 @@
                 if (!response.ok || !result.success) throw new Error(result.error || `Stock tab request failed (${response.status}).`);
                 if (currentRequest !== missingStockRequest) return;
                 missingStockEntries = result.entries || [];
+                updateMissingCampaignSuggestions(missingStockEntries.map(entry => entry.campaign_code || ''));
                 missingStockSheetUrl = result.sheet_url || missingStockSheetUrl;
             } catch (error) {
                 if (currentRequest !== missingStockRequest) return;
@@ -2093,8 +2188,14 @@
 
         function clearMissingCreativeFilters() {
             document.getElementById('missing-creative-query').value = '';
+            updateInputClearButton(document.getElementById('missing-creative-query'));
+            document.getElementById('missing-search-type').value = 'creative';
+            document.getElementById('missing-creative-query').removeAttribute('list');
+            document.getElementById('missing-creative-query').placeholder = 'Type creative-name keywords...';
             document.getElementById('missing-creative-target').value = '';
+            updateInputClearButton(document.getElementById('missing-creative-target'));
             document.getElementById('missing-stock-tab').value = '';
+            updateInputClearButton(document.getElementById('missing-stock-tab'));
             selectedMissingCreativeCategories.clear();
             missingStockAvailabilityFilter = 'all';
             handleMissingStockTabChange();
@@ -2120,6 +2221,8 @@
 
             const queryText = queryInput.value.trim();
             const query = queryText.toLocaleLowerCase();
+            const searchType = document.getElementById('missing-search-type').value;
+            const isCampaignSearch = searchType === 'campaign';
             const target = targetSelect.value;
             const stockTab = stockTabSelect.value;
             if (!query) {
@@ -2136,6 +2239,10 @@
                 results.innerHTML = '<p class="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">Sync the report to search the selected ET.</p>';
                 return;
             }
+            if (isCampaignSearch && !stockTab) {
+                results.innerHTML = '<p class="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">Select a stock spreadsheet tab to search by campaign.</p>';
+                return;
+            }
             if (stockTab && missingStockError) {
                 results.innerHTML = `<p class="rounded-xl border border-red-200 bg-red-50 px-4 py-4 text-sm font-semibold text-red-800">${escapeHtml(missingStockError)}</p>`;
                 return;
@@ -2149,16 +2256,36 @@
                 return;
             }
 
-            const matchingEntries = stockTab ? missingStockEntries.filter(entry => {
-                    if (!isTabColorAllowed(entry.stock_tab_color)) return false;
-                    const searchable = [
-                        entry.campaign,
-                        entry.campaign_code,
-                        ...(entry.campaign_aliases || []),
-                        entry.creative
-                    ].join(' ').toLocaleLowerCase();
-                    return searchable.includes(query);
-                }) : [];
+            const normalizedCampaignQuery = queryText.replace(/\s+/g, ' ').toLocaleLowerCase();
+            let matchingEntries = [];
+            let matchedCampaignLabel = '';
+            if (stockTab && isCampaignSearch) {
+                const exactCodeMatches = missingStockEntries.filter(entry =>
+                    (entry.campaign_code || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase() === normalizedCampaignQuery
+                );
+                const exactNameMatches = exactCodeMatches.length ? [] : missingStockEntries.filter(entry =>
+                    (entry.campaign || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase() === normalizedCampaignQuery
+                );
+                const matchedCodes = new Set(exactCodeMatches.length
+                    ? exactCodeMatches.map(entry => entry.campaign_code.trim().toLocaleLowerCase())
+                    : exactNameMatches.map(entry => (entry.campaign_code || '').trim().toLocaleLowerCase()).filter(Boolean));
+                const matchedNamesWithoutCode = new Set(exactNameMatches
+                    .filter(entry => !entry.campaign_code)
+                    .map(entry => entry.campaign.trim().toLocaleLowerCase()));
+                const campaignEntries = matchedCodes.size
+                    ? missingStockEntries.filter(entry => matchedCodes.has((entry.campaign_code || '').trim().toLocaleLowerCase()))
+                    : matchedNamesWithoutCode.size
+                        ? missingStockEntries.filter(entry => matchedNamesWithoutCode.has((entry.campaign || '').trim().toLocaleLowerCase()))
+                        : [];
+                matchingEntries = campaignEntries.filter(entry => isTabColorAllowed(entry.stock_tab_color));
+                matchedCampaignLabel = campaignEntries[0]?.campaign_code || campaignEntries[0]?.campaign || queryText;
+            } else if (stockTab) {
+                const creativeKeywords = query.split(/\s+/).filter(Boolean);
+                matchingEntries = missingStockEntries.filter(entry =>
+                    isTabColorAllowed(entry.stock_tab_color)
+                    && creativeKeywords.every(keyword => entry.creative.toLocaleLowerCase().includes(keyword))
+                );
+            }
             const stockByCreative = new Map();
             for (const entry of matchingEntries) {
                 const normalizedName = entry.creative.trim().toLocaleLowerCase();
@@ -2187,6 +2314,10 @@
                 .map(item => item.et.trim().toLocaleLowerCase()));
             const etByCreative = new Map();
             if (target && !stockTab) {
+                if (isCampaignSearch) {
+                    results.innerHTML = '<p class="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">Select a stock spreadsheet tab to search by campaign.</p>';
+                    return;
+                }
                 for (const entry of globalData) {
                     const name = entry.et.trim();
                     if (!name.toLocaleLowerCase().includes(query)) continue;
@@ -2220,6 +2351,10 @@
                 </div>` : '';
             if (!displayCreatives.length) {
                 selectedMissingCreativeCategories.clear();
+                if (isCampaignSearch) {
+                    results.innerHTML = `<p class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-5 text-center text-sm font-semibold text-amber-800">No exact campaign named or coded “${escapeHtml(queryText)}” was found in ${escapeHtml(stockTabLabel)}.</p>`;
+                    return;
+                }
                 if (stockTab && missingStockAvailabilityFilter === 'missing' && stockCreatives.length) {
                     results.innerHTML = `${stockAvailabilityFilters}
                         <p class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-5 text-center text-sm font-semibold text-emerald-800">All matching stock creatives are already listed in an ET.</p>`;
@@ -2265,8 +2400,9 @@
             const etOnly = Boolean(target && !stockTab);
             results.innerHTML = `
                 ${stockAvailabilityFilters}
+                ${isCampaignSearch ? `<p class="mb-2 text-xs font-bold text-cyan-900">Exact campaign: ${escapeHtml(matchedCampaignLabel)}</p>` : ''}
                 <div class="mb-3 rounded-xl border border-cyan-100 bg-white/70 p-3">
-                    <p class="mb-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Auto-detected creative suffixes</p>
+                    <p class="mb-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-500">All creative versions and suffixes</p>
                     <div class="flex max-h-28 flex-wrap items-center gap-2 overflow-y-auto" aria-label="Filter creatives by suffix">
                     ${categoryButton('ALL', displayCreatives.length, selectedMissingCreativeCategories.size === 0)}
                     ${categories.map(category => categoryButton(
@@ -2789,6 +2925,25 @@
             finder.focus({ preventScroll: true });
         }
 
+        function updateInputClearButton(input) {
+            const clearButton = document.getElementById(`${input.id}-clear`);
+            if (clearButton) clearButton.style.display = input.value ? 'inline-flex' : 'none';
+        }
+
+        function clearInputField(inputId) {
+            const input = document.getElementById(inputId);
+            input.value = '';
+            updateInputClearButton(input);
+            if (input.tagName === 'SELECT') {
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            } else if (input.type === 'date') {
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            } else {
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            input.focus({ preventScroll: true });
+        }
+
         function showMoreGlobalSearchResults() {
             globalSearchLimit += GLOBAL_SEARCH_PAGE_SIZE;
             renderTablePreservingScroll();
@@ -2840,6 +2995,8 @@
             document.getElementById('end-date').value = '';
             document.getElementById('search-et').value = etName;
             document.getElementById('creative-finder').value = etName;
+            updateInputClearButton(document.getElementById('search-et'));
+            document.getElementById('creative-finder-clear').style.display = 'inline-flex';
             document.getElementById('creative-finder-date-range').checked = false;
             dateRangeManuallyChanged = true;
             creativeSuggestionsSuppressed = true;

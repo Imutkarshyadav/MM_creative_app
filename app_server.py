@@ -16,6 +16,7 @@ from api.index import (
     admin_api_request,
     extract_sheet_cell_colors,
     extract_sheet_tab_colors,
+    get_missing_stock_campaign_codes,
     is_completed_status,
     load_missing_stock,
     MISSING_STOCK_SHEET_URL,
@@ -207,7 +208,8 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
                     payload = {
                         "success": True,
                         "sheet_url": MISSING_STOCK_SHEET_URL,
-                        "tabs": stock['tabs']
+                        "tabs": stock['tabs'],
+                        "campaign_codes": get_missing_stock_campaign_codes(stock)
                     }
             except Exception as error:
                 print(f"Could not load missing-creative stock sheet: {error}")

@@ -607,6 +607,16 @@ def load_missing_stock():
     return missing_stock_cache
 
 
+def get_missing_stock_campaign_codes(stock):
+    return sorted({
+        code
+        for entries in stock["entries"].values()
+        for entry in entries
+        for code in [(entry.get("campaign_code") or "").strip()]
+        if code and code[0].isalnum()
+    }, key=str.casefold)
+
+
 @app.route("/api/missing-stock", methods=["GET"])
 def get_missing_stock():
     try:
@@ -633,7 +643,8 @@ def get_missing_stock():
             return jsonify({
                 "success": True,
                 "sheet_url": MISSING_STOCK_SHEET_URL,
-                "tabs": stock["tabs"]
+                "tabs": stock["tabs"],
+                "campaign_codes": get_missing_stock_campaign_codes(stock)
             })
         if tab_name not in stock["entries"]:
             return jsonify({"success": False, "error": "The selected stock tab was not found."}), 404
