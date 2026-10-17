@@ -156,6 +156,8 @@ def get_daily_report_events(report_date):
     )
     try:
         with urllib.request.urlopen(endpoint_request, timeout=8) as response:
+            response_status = response.status
+            response_content_type = response.headers.get_content_type()
             response_body = response.read(1024 * 1024 + 1)
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
         raise RuntimeError("Could not connect to the private audit endpoint.") from error
@@ -164,7 +166,17 @@ def get_daily_report_events(report_date):
     try:
         result = json.loads(response_body.decode("utf-8"))
     except (UnicodeDecodeError, ValueError) as error:
-        raise RuntimeError("The private audit endpoint returned invalid JSON.") from error
+        if response_content_type == "text/html":
+            raise RuntimeError(
+                "Apps Script returned an HTML page instead of JSON "
+                f"(HTTP {response_status}). Check that AUDIT_WEB_APP_URL is the deployed /exec URL "
+                "and that the web app is deployed with access set to Anyone."
+            ) from error
+        raise RuntimeError(
+            "The private audit endpoint returned invalid JSON "
+            f"(HTTP {response_status}, content type: {response_content_type}). "
+            "Check the Apps Script deployment and Vercel function logs."
+        ) from error
     if not isinstance(result, dict) or result.get("success") is not True:
         message = result.get("error") if isinstance(result, dict) else None
         raise RuntimeError(message or "The private audit endpoint rejected the request.")
