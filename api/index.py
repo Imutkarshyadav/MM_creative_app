@@ -77,6 +77,16 @@ def compress_sync_response(response):
     return response
 
 
+def make_sync_response(response_body, compressed_body):
+    response = app.response_class(response_body, mimetype="application/json")
+    if compressed_body:
+        response.headers["Vary"] = "Accept-Encoding"
+        if request.accept_encodings.quality("gzip") > 0:
+            response.set_data(compressed_body)
+            response.headers["Content-Encoding"] = "gzip"
+    return response
+
+
 @app.route("/api/push/config", methods=["GET"])
 def get_push_config():
     return jsonify(push_configuration())
@@ -1101,10 +1111,10 @@ def sync_data():
             and cache["local_date"] == client_today.isoformat()
             and current_time - cache["timestamp"] < CACHE_DURATION
         ):
-            return jsonify({
-                "success": True,
-                "data": cache["data"]
-            })
+            response_body = cache.get("response_body")
+            if response_body is not None:
+                return make_sync_response(response_body, cache.get("gzip_body"))
+            return jsonify({"success": True, "data": cache["data"]})
 
         # FIX 1: Robust Fetching with Retries & User Agent Rotation to bypass Google IP blocks
         USER_AGENTS = [
@@ -1269,10 +1279,17 @@ def sync_data():
         cache["timestamp"] = time.time()
         cache["local_date"] = client_today.isoformat()
 
-        return jsonify({
+        response_body = jsonify({
             "success": True,
             "data": results
-        })
+        }).get_data()
+        compressed_body = (
+            gzip.compress(response_body, compresslevel=5, mtime=0)
+            if len(response_body) > 1024 else None
+        )
+        cache["response_body"] = response_body
+        cache["gzip_body"] = compressed_body
+        return make_sync_response(response_body, compressed_body)
         
     except Exception as e:
         print("Error during sync:", str(e))
