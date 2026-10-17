@@ -122,6 +122,11 @@
                         <span class="hidden text-xs font-bold sm:inline">Admin Access</span>
                     </button>
 
+                    <button type="button" id="admin-daily-report-btn" onclick="openAdminDailyReport()" class="hidden h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 transition-colors hover:bg-emerald-100" aria-label="Daily Report" title="Daily Report">
+                        <i class="fa-solid fa-chart-column" aria-hidden="true"></i>
+                        <span>Daily Report</span>
+                    </button>
+
                     <div id="tab-color-settings" class="relative shrink-0 hidden">
                         <button type="button" id="tab-color-settings-toggle" onclick="toggleTabColorSettings()" aria-label="Color settings" aria-expanded="false" aria-controls="tab-color-settings-panel" title="Color settings" class="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-100">
                             <i class="fa-solid fa-palette" aria-hidden="true"></i>
@@ -370,7 +375,7 @@
     </main>
 
     <div id="admin-access-modal" class="fixed inset-0 z-[80] hidden items-center justify-center bg-slate-950/50 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="admin-access-title" tabindex="-1" onclick="if (event.target === this) closeAdminAccess()">
-        <section class="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <section class="w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl">
             <header class="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
                 <div>
                     <p class="text-[10px] font-bold uppercase tracking-widest text-blue-600">Protected settings</p>
@@ -404,7 +409,7 @@
                         <i class="fa-solid fa-key mr-1" aria-hidden="true"></i> Change Password
                     </button>
                 </div>
-                <section id="admin-settings-content" role="tabpanel" aria-labelledby="admin-settings-tab">
+                <section id="admin-settings-content" class="hidden" role="tabpanel" aria-labelledby="admin-settings-tab" hidden>
                     <p class="mb-4 text-sm leading-relaxed text-slate-600">Choose which settings are available in the app.</p>
                     <label class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                         <span>
@@ -440,6 +445,30 @@
                 <button type="button" onclick="adminLogout()" class="mt-4 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">
                     <i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i> Sign out
                 </button>
+            </div>
+        </section>
+    </div>
+
+    <div id="admin-daily-report-modal" class="fixed inset-0 z-[85] hidden items-center justify-center bg-slate-950/50 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="admin-daily-report-title" tabindex="-1" onclick="if (event.target === this) closeAdminDailyReport()">
+        <section class="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <header class="flex items-center justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Admin report</p>
+                    <h2 id="admin-daily-report-title" class="mt-1 text-lg font-black text-slate-900 sm:text-xl">Completed creatives by uploader and ET</h2>
+                </div>
+                <button type="button" aria-label="Close daily report" title="Close" onclick="closeAdminDailyReport()" class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900">
+                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                </button>
+            </header>
+            <div class="min-h-0 overflow-y-auto p-4 sm:p-6">
+                <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
+                    <p class="text-xs text-slate-500">Uploader name and ID use the Google email recorded by the sheet audit.</p>
+                    <label class="flex items-center gap-2 text-xs font-bold text-slate-700">
+                        Work date
+                        <input id="admin-report-date" type="date" onchange="loadAdminDailyReport()" class="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50">
+                    </label>
+                </div>
+                <div id="admin-daily-report-results" aria-live="polite"></div>
             </div>
         </section>
     </div>
@@ -523,8 +552,11 @@
         let adminColorSettingsEnabled = true;
         let adminAuthenticated = false;
         let adminConfigurationError = '';
-        const AUDIT_SEEN_EVENTS_KEY = 'creative-report-audit-seen-events-v1';
-        const auditNotificationState = loadAuditNotificationState();
+        let auditEvents = [];
+        let auditTrackingEnabled = false;
+        let auditDataLoaded = false;
+        let auditLoadError = '';
+        let auditRequestSequence = 0;
         let alertsEnabled = false;
         let notificationSequence = 0;
         let deferredInstallPrompt = null;
@@ -964,99 +996,6 @@
             }
         }
 
-        function loadAuditNotificationState() {
-            try {
-                const savedState = JSON.parse(localStorage.getItem(AUDIT_SEEN_EVENTS_KEY) || 'null');
-                return {
-                    initialized: Boolean(savedState?.initialized),
-                    ids: new Set(Array.isArray(savedState?.ids) ? savedState.ids : [])
-                };
-            } catch (error) {
-                console.error('Could not load audit notification state:', error);
-                return { initialized: false, ids: new Set() };
-            }
-        }
-
-        function saveAuditNotificationState() {
-            try {
-                localStorage.setItem(AUDIT_SEEN_EVENTS_KEY, JSON.stringify({
-                    initialized: auditNotificationState.initialized,
-                    ids: [...auditNotificationState.ids].slice(-1000)
-                }));
-            } catch (error) {
-                console.error('Could not save audit notification state:', error);
-            }
-        }
-
-        function formatAuditValue(value) {
-            const text = String(value || '').trim();
-            if (!text) return '(blank)';
-            try {
-                const parsed = JSON.parse(text);
-                if (Array.isArray(parsed)) return parsed.flat(3).join(', ') || '(blank)';
-            } catch {
-                // Keep ordinary cell values as-is.
-            }
-            return text;
-        }
-
-        function processAuditEvents(events) {
-            if (!Array.isArray(events) || events.length === 0) return 0;
-
-            const freshEvents = events.filter(event => event.id && !auditNotificationState.ids.has(event.id));
-            for (const event of events) {
-                if (event.id) auditNotificationState.ids.add(event.id);
-            }
-            while (auditNotificationState.ids.size > 1000) {
-                auditNotificationState.ids.delete(auditNotificationState.ids.values().next().value);
-            }
-
-            if (!auditNotificationState.initialized) {
-                auditNotificationState.initialized = true;
-                saveAuditNotificationState();
-                return 0;
-            }
-
-            auditNotificationState.initialized = true;
-            saveAuditNotificationState();
-            if (!alertsEnabled || freshEvents.length === 0) return 0;
-
-            const groups = new Map();
-            for (const event of freshEvents) {
-                const groupName = String(event.sheet || 'Spreadsheet');
-                const groupKey = groupName;
-                if (!groups.has(groupKey)) groups.set(groupKey, { name: groupName, events: [] });
-                groups.get(groupKey).events.push(event);
-            }
-
-            for (const group of groups.values()) {
-                const visibleEvents = group.events.slice(0, 5);
-                const details = visibleEvents.map(event => {
-                    const actor = event.editor || 'Editor identity unavailable';
-                    const creative = event.et ? `Creative ${event.et} — ` : '';
-                    const column = event.column || event.range || 'Cell';
-                    const previous = formatAuditValue(event.old_value);
-                    const current = formatAuditValue(event.new_value);
-                    return `${creative}${actor}: ${column} changed ${previous} → ${current}`;
-                });
-                if (group.events.length > visibleEvents.length) {
-                    details.push(`+${group.events.length - visibleEvents.length} more edits (all are in the audit log)`);
-                }
-
-                const title = `${group.name} · ${group.events.length} edit${group.events.length === 1 ? '' : 's'}`;
-                const message = details.join('\n');
-                const tag = `audit-${encodeURIComponent(group.name)}-${Date.now()}-${++notificationSequence}`;
-                if ('Notification' in window
-                    && window.isSecureContext
-                    && Notification.permission === 'granted') {
-                    showDesktopNotification(title, message, tag, group.name);
-                } else {
-                    showQueuedNotificationToast(title, message, 'info', group.name);
-                }
-            }
-            return freshEvents.length;
-        }
-
         function saveGroupedAlertHistory() {
             try {
                 localStorage.setItem(GROUPED_ALERT_HISTORY_KEY, JSON.stringify(groupedAlertHistory));
@@ -1154,7 +1093,7 @@
             return states;
         }
 
-        function showCreativeUpdateNotification(newData, suppressDuplicateNotifications = false) {
+        function showCreativeUpdateNotification(newData) {
             const currentStates = new Map();
             const currentRows = new Map();
             const startDate = document.getElementById('start-date')?.value || '';
@@ -1342,8 +1281,7 @@
 
                     const completionMessage = changes.some(change => change.type === 'completed');
                     const reopenedMessage = changes.some(change => change.type === 'reopened');
-                    if ((!alertsEnabled && !hasAlwaysNotifyChange)
-                        || (suppressDuplicateNotifications && !completionMessage && !reopenedMessage)) {
+                    if (!alertsEnabled && !hasAlwaysNotifyChange) {
                         continue;
                     }
 
@@ -1714,6 +1652,8 @@
             adminColorSettingsEnabled = Boolean(enabled);
             const colorSettings = document.getElementById('tab-color-settings');
             if (colorSettings) colorSettings.classList.toggle('hidden', !adminColorSettingsEnabled || !adminAuthenticated);
+            const dailyReportButton = document.getElementById('admin-daily-report-btn');
+            if (dailyReportButton) dailyReportButton.classList.toggle('hidden', !adminAuthenticated);
         }
 
         async function requestAdminConfig(method = 'GET', payload = {}) {
@@ -1762,6 +1702,25 @@
             document.getElementById('admin-access-btn')?.focus({ preventScroll: true });
         }
 
+        function openAdminDailyReport() {
+            if (!adminAuthenticated) {
+                openAdminAccess();
+                return;
+            }
+            const modal = document.getElementById('admin-daily-report-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            loadAdminDailyReport();
+            modal.focus({ preventScroll: true });
+        }
+
+        function closeAdminDailyReport() {
+            const modal = document.getElementById('admin-daily-report-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            document.getElementById('admin-daily-report-btn')?.focus({ preventScroll: true });
+        }
+
         function showAdminAccessPanel(isAuthenticated) {
             adminAuthenticated = isAuthenticated;
             setColorSettingsAvailable(adminColorSettingsEnabled);
@@ -1777,35 +1736,170 @@
         }
 
         function selectAdminTab(tabName) {
-            const showPassword = tabName === 'password';
-            const settingsTab = document.getElementById('admin-settings-tab');
-            const passwordTab = document.getElementById('admin-password-tab');
-            const settingsContent = document.getElementById('admin-settings-content');
-            const passwordContent = document.getElementById('admin-password-content');
-
-            settingsTab.setAttribute('aria-selected', String(!showPassword));
-            passwordTab.setAttribute('aria-selected', String(showPassword));
-            settingsTab.tabIndex = showPassword ? -1 : 0;
-            passwordTab.tabIndex = showPassword ? 0 : -1;
-            settingsTab.className = !showPassword
-                ? 'rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white'
-                : 'rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200';
-            passwordTab.className = showPassword
-                ? 'rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white'
-                : 'rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200';
-            settingsContent.classList.toggle('hidden', showPassword);
-            passwordContent.classList.toggle('hidden', !showPassword);
-            passwordContent.hidden = !showPassword;
+            const tabs = ['settings', 'password'];
+            const selectedTab = tabs.includes(tabName) ? tabName : 'settings';
+            for (const tab of tabs) {
+                const selected = tab === selectedTab;
+                const tabButton = document.getElementById(`admin-${tab}-tab`);
+                const content = document.getElementById(`admin-${tab}-content`);
+                tabButton.setAttribute('aria-selected', String(selected));
+                tabButton.tabIndex = selected ? 0 : -1;
+                tabButton.className = selected
+                    ? 'rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white'
+                    : 'rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200';
+                content.classList.toggle('hidden', !selected);
+                content.hidden = !selected;
+            }
         }
 
         function handleAdminTabKeydown(event) {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
             event.preventDefault();
-            const nextTab = event.key === 'Home' || event.key === 'ArrowLeft'
-                ? 'settings'
-                : 'password';
+            const tabs = ['settings', 'password'];
+            const currentIndex = tabs.findIndex(tab => document.getElementById(`admin-${tab}-tab`) === event.currentTarget);
+            const nextIndex = event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                    ? tabs.length - 1
+                    : (currentIndex + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length;
+            const nextTab = tabs[nextIndex];
             selectAdminTab(nextTab);
             document.getElementById(`admin-${nextTab}-tab`).focus();
+        }
+
+        function auditStatusValues(value) {
+            const text = String(value || '').trim();
+            if (!text) return [];
+            try {
+                const parsed = JSON.parse(text);
+                const values = [];
+                const collect = item => {
+                    if (Array.isArray(item)) item.forEach(collect);
+                    else if (item !== null && item !== undefined) values.push(String(item).trim());
+                };
+                collect(parsed);
+                return values;
+            } catch {
+                return [text];
+            }
+        }
+
+        function isDailyReportDoneStatus(value) {
+            const status = String(value || '').trim().toUpperCase();
+            return status.includes('DONE') || status === 'Y';
+        }
+
+        async function loadAdminDailyReport() {
+            const dateInput = document.getElementById('admin-report-date');
+            if (!dateInput) return;
+            if (!dateInput.value) dateInput.value = getLocalDateValue();
+
+            const reportDate = dateInput.value;
+            const requestSequence = ++auditRequestSequence;
+            auditDataLoaded = false;
+            auditLoadError = '';
+            renderAdminDailyReport();
+
+            try {
+                const response = await fetch(
+                    `/api/admin/daily-report?date=${encodeURIComponent(reportDate)}`,
+                    { credentials: 'same-origin', cache: 'no-store' }
+                );
+                const contentType = response.headers.get('content-type') || '';
+                if (!contentType.toLowerCase().includes('application/json')) {
+                    throw new Error('Daily Report endpoint returned a non-JSON response. Verify the app server and Apps Script deployment configuration.');
+                }
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error || `Daily Report request failed (${response.status}).`);
+                }
+                if (requestSequence !== auditRequestSequence) return;
+                auditEvents = Array.isArray(result.events) ? result.events : [];
+                auditTrackingEnabled = result.tracking_enabled === true;
+            } catch (error) {
+                if (requestSequence !== auditRequestSequence) return;
+                auditEvents = [];
+                auditTrackingEnabled = false;
+                auditLoadError = error.message || 'Could not load the private audit report.';
+                console.error('Could not load the private Daily Report:', error);
+            }
+            auditDataLoaded = true;
+            renderAdminDailyReport();
+        }
+
+        function renderAdminDailyReport() {
+            const dateInput = document.getElementById('admin-report-date');
+            const container = document.getElementById('admin-daily-report-results');
+            if (!dateInput || !container) return;
+            if (!dateInput.value) dateInput.value = getLocalDateValue();
+
+            if (!auditDataLoaded) {
+                container.innerHTML = '<p class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-600">Loading private audit data…</p>';
+                return;
+            }
+            if (auditLoadError) {
+                container.innerHTML = `<p class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-5 text-sm text-rose-900">${escapeHtml(auditLoadError)}</p>`;
+                return;
+            }
+            if (!auditTrackingEnabled) {
+                container.innerHTML = '<p class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-5 text-sm text-amber-900">Private upload audit tracking is not set up yet. In the CREATIVE UPLOADINGS spreadsheet, open Extensions → Apps Script, run <code class="rounded bg-amber-100 px-1 py-0.5 font-bold">setupCreativeChangeAudit()</code>, and approve access to the separate audit spreadsheet. Then deploy the web app and configure its URL and token on the app server. The private spreadsheet is not made public. The report can identify completions only from the time tracking is enabled; older Done entries cannot be attributed retroactively.</p>';
+                return;
+            }
+
+            const groups = new Map();
+            for (const event of auditEvents) {
+                const timestamp = String(event.timestamp || '');
+                if (timestamp.slice(0, 10) !== dateInput.value) continue;
+                if (!/status/i.test(String(event.column || ''))) continue;
+                const newDone = auditStatusValues(event.new_value).some(isDailyReportDoneStatus);
+                const oldDone = auditStatusValues(event.old_value).some(isDailyReportDoneStatus);
+                if (!newDone || oldDone || !String(event.et || '').trim()) continue;
+
+                const editor = String(event.editor || '').trim() || 'Editor identity unavailable';
+                const sheet = String(event.sheet || '').trim() || 'Unknown ET';
+                const creative = String(event.et).trim();
+                const groupKey = `${editor}\u0000${sheet}`;
+                let group = groups.get(groupKey);
+                if (!group) {
+                    group = { editor, sheet, creatives: new Map() };
+                    groups.set(groupKey, group);
+                }
+                const creativeKey = creative.toLocaleLowerCase();
+                if (!group.creatives.has(creativeKey)) {
+                    group.creatives.set(creativeKey, { name: creative, timestamp });
+                }
+            }
+
+            const reportRows = [...groups.values()]
+                .sort((a, b) => a.sheet.localeCompare(b.sheet) || a.editor.localeCompare(b.editor));
+            if (!reportRows.length) {
+                container.innerHTML = `<p class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-600">No creatives were marked Done on ${escapeHtml(dateInput.value)}.</p>`;
+                return;
+            }
+
+            const completedTotal = reportRows.reduce((total, row) => total + row.creatives.size, 0);
+            container.innerHTML = `
+                <div class="mb-3 flex flex-wrap items-center gap-2">
+                    <span class="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">${completedTotal} creative${completedTotal === 1 ? '' : 's'} marked Done</span>
+                    <span class="rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">${reportRows.length} uploader / ET group${reportRows.length === 1 ? '' : 's'}</span>
+                </div>
+                <div class="overflow-x-auto rounded-xl border border-slate-200">
+                    <table class="w-full min-w-[760px] text-left text-xs">
+                        <thead class="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+                            <tr><th class="px-3 py-2">User name</th><th class="px-3 py-2">User ID</th><th class="px-3 py-2">ET / upload sheet</th><th class="px-3 py-2">Done</th><th class="px-3 py-2">Creative names</th></tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            ${reportRows.map(row => `
+                                <tr class="align-top">
+                                    <td class="break-all px-3 py-2 font-semibold text-slate-800">${escapeHtml(row.editor)}</td>
+                                    <td class="break-all px-3 py-2 text-slate-600">${escapeHtml(row.editor)}</td>
+                                    <td class="px-3 py-2 font-semibold text-slate-700">${escapeHtml(row.sheet)}</td>
+                                    <td class="px-3 py-2 font-bold text-emerald-700">${row.creatives.size}</td>
+                                    <td class="px-3 py-2 text-slate-700">${[...row.creatives.values()].map(item => escapeHtml(item.name)).join('<br>')}</td>
+                                </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>`;
         }
 
         async function submitAdminLogin(event) {
@@ -1819,6 +1913,7 @@
                     password: document.getElementById('admin-password').value
                 });
                 setColorSettingsAvailable(result.color_settings_enabled);
+                adminAuthenticated = true;
                 showAdminAccessPanel(true);
             } catch (error) {
                 errorMessage.textContent = error.message;
@@ -1888,6 +1983,7 @@
             try {
                 await requestAdminConfig('POST', { action: 'logout' });
                 showAdminAccessPanel(false);
+                closeAdminDailyReport();
                 closeAdminAccess();
             } catch (error) {
                 const message = document.getElementById('admin-settings-message');
@@ -2611,12 +2707,9 @@
                 }
                 renderMissingCreativeFinderPreservingScroll();
                 loadMissingStockTabs();
-                const freshAuditEventCount = result.audit_tracking
-                    ? processAuditEvents(result.audit_events)
-                    : 0;
                 if (isDataChanged) {
                     rebuildCreativeVersionIndex();
-                    showCreativeUpdateNotification(newData, freshAuditEventCount > 0);
+                    showCreativeUpdateNotification(newData);
                 }
                 hasFetchedOnce = true;
                 

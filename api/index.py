@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request, send_from_directory
 import urllib.request
+import urllib.error
 import json
 import gzip
 import time
@@ -31,8 +32,6 @@ HISTORY_FILE = '/tmp/creative_history.json'
 cache = {
     "timestamp": 0,
     "data": None,
-    "audit_events": [],
-    "audit_tracking": False,
     "last_raw_excel": None,
     "local_date": None
 }
@@ -44,7 +43,7 @@ SHEET_GID_PATTERN = re.compile(
 )
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-AUDIT_SHEET_NAME = "Creative Change Audit"
+AUDIT_SHEET_NAME = "Daily Report"
 PUSH_SUBSCRIPTIONS_KEY = "creative-report:push:subscriptions"
 PUSH_SNAPSHOT_KEY = "creative-report:push:last-snapshot"
 PUSH_CHECK_INTERVAL_SECONDS = 30
@@ -124,6 +123,81 @@ def admin_config():
             path="/"
         )
     return response, status
+
+
+def get_daily_report_events(report_date):
+    endpoint_url = os.environ.get("AUDIT_WEB_APP_URL", "").strip()
+    api_token = os.environ.get("AUDIT_API_TOKEN", "").strip()
+    if not endpoint_url or not api_token:
+        raise RuntimeError(
+            "Private audit access is not configured. Set AUDIT_WEB_APP_URL and AUDIT_API_TOKEN on the app server."
+        )
+
+    payload = json.dumps({
+        "action": "get_daily_report",
+        "date": report_date,
+        "token": api_token
+    }).encode("utf-8")
+    endpoint_request = urllib.request.Request(
+        endpoint_url,
+        data=payload,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(endpoint_request, timeout=8) as response:
+            response_body = response.read(1024 * 1024 + 1)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+        raise RuntimeError("Could not connect to the private audit endpoint.") from error
+    if len(response_body) > 1024 * 1024:
+        raise RuntimeError("The private audit endpoint returned too much data.")
+    try:
+        result = json.loads(response_body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as error:
+        raise RuntimeError("The private audit endpoint returned invalid JSON.") from error
+    if not isinstance(result, dict) or result.get("success") is not True:
+        message = result.get("error") if isinstance(result, dict) else None
+        raise RuntimeError(message or "The private audit endpoint rejected the request.")
+    events = result.get("events")
+    if not isinstance(events, list) or any(not isinstance(event, dict) for event in events):
+        raise RuntimeError("The private audit endpoint returned an invalid event list.")
+    return {
+        "events": events,
+        "tracking_enabled": result.get("tracking_enabled") is True
+    }
+
+
+@app.route("/api/admin/daily-report", methods=["GET"])
+def admin_daily_report():
+    response_headers = {"Cache-Control": "no-store"}
+    try:
+        settings = get_admin_settings()
+        session_token = request.cookies.get(ADMIN_COOKIE_NAME, "")
+        if not is_valid_admin_session(session_token, settings):
+            response = jsonify({"success": False, "error": "Admin sign-in is required."})
+            response.headers.update(response_headers)
+            return response, 401
+        report_date = request.args.get("date", "")
+        try:
+            parsed_date = datetime.strptime(report_date, "%Y-%m-%d").date()
+        except ValueError:
+            response = jsonify({"success": False, "error": "A valid report date is required."})
+            response.headers.update(response_headers)
+            return response, 400
+        if parsed_date.isoformat() != report_date:
+            response = jsonify({"success": False, "error": "A valid report date is required."})
+            response.headers.update(response_headers)
+            return response, 400
+
+        report = get_daily_report_events(report_date)
+        response = jsonify({"success": True, **report})
+        response.headers.update(response_headers)
+        return response
+    except RuntimeError as error:
+        print(f"Daily Report request failed: {error}")
+        response = jsonify({"success": False, "error": str(error)})
+        response.headers.update(response_headers)
+        return response, 503
 
 
 def get_admin_settings():
@@ -1029,9 +1103,7 @@ def sync_data():
         ):
             return jsonify({
                 "success": True,
-                "data": cache["data"],
-                "audit_events": cache["audit_events"],
-                "audit_tracking": cache["audit_tracking"]
+                "data": cache["data"]
             })
 
         # FIX 1: Robust Fetching with Retries & User Agent Rotation to bypass Google IP blocks
@@ -1075,55 +1147,12 @@ def sync_data():
         history = load_history()
         history_dirty = False
         results = []
-        audit_events = []
-        audit_tracking = False
 
         for sheet_name in wb.sheet_names:
+            if sheet_name.strip().casefold() == AUDIT_SHEET_NAME.casefold():
+                continue
             ws = wb.get_sheet_by_name(sheet_name)
             sheet_rows_data = ws.to_python()
-
-            if sheet_name.strip().casefold() == AUDIT_SHEET_NAME.casefold():
-                if not sheet_rows_data:
-                    continue
-                audit_headers = [
-                    str(cell).strip().casefold() if cell is not None else ""
-                    for cell in sheet_rows_data[0]
-                ]
-                audit_columns = {name: index for index, name in enumerate(audit_headers)}
-                required_audit_headers = {
-                    "event id", "timestamp", "editor", "sheet", "et / creative",
-                    "range", "column", "old value", "new value"
-                }
-                if required_audit_headers.issubset(audit_columns):
-                    audit_tracking = True
-                    for audit_row in sheet_rows_data[1:]:
-                        event_id_index = audit_columns["event id"]
-                        if event_id_index >= len(audit_row) or not audit_row[event_id_index]:
-                            continue
-
-                        def audit_value(column_name):
-                            column_index = audit_columns[column_name]
-                            if column_index >= len(audit_row):
-                                return ""
-                            value = audit_row[column_index]
-                            if value is None:
-                                return ""
-                            if isinstance(value, (date, datetime)):
-                                return value.isoformat()
-                            return str(value).strip()
-
-                        audit_events.append({
-                            "id": audit_value("event id"),
-                            "timestamp": audit_value("timestamp"),
-                            "editor": audit_value("editor"),
-                            "sheet": audit_value("sheet"),
-                            "et": audit_value("et / creative"),
-                            "range": audit_value("range"),
-                            "column": audit_value("column"),
-                            "old_value": audit_value("old value"),
-                            "new_value": audit_value("new value")
-                        })
-                continue
 
             headers_found = False
             date_col_idx = 0
@@ -1237,16 +1266,12 @@ def sync_data():
             print(f"Could not process mobile push updates: {push_error}")
             
         cache["data"] = results
-        cache["audit_events"] = audit_events[-1000:]
-        cache["audit_tracking"] = audit_tracking
         cache["timestamp"] = time.time()
         cache["local_date"] = client_today.isoformat()
 
         return jsonify({
             "success": True,
-            "data": results,
-            "audit_events": cache["audit_events"],
-            "audit_tracking": audit_tracking
+            "data": results
         })
         
     except Exception as e:

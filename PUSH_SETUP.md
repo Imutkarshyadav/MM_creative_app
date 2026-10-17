@@ -48,6 +48,29 @@ The header's **Admin Access** button protects the app-wide Color Settings visibi
 - Once signed in, use **Change admin password** in the Admin Access panel. Passwords must be at least 12 characters and are stored as salted hashes in the same persistent settings store; changing the password invalidates existing admin sessions except the session that made the change. After a password is changed, the saved hash takes precedence over `ADMIN_PASSWORD`. To reset a forgotten changed password, remove the saved `admin_password_hash` and `admin_password_salt` fields from the local `admin_settings.json` or stored Upstash settings, then restart or redeploy; the configured `ADMIN_PASSWORD` will be used again.
 - Color Settings visibility is refreshed by open app pages every 30 seconds. The setting affects which users see the control; their saved color preferences are unchanged.
 
+## Private Daily Report audit
+
+The admin-only Daily Report reads its edit history from a separate, private spreadsheet. The Apps Script edit trigger stays attached to the **CREATIVE UPLOADINGS** source spreadsheet and writes audit rows to the destination spreadsheet ID `1iDQoBTDHsrfavBA4iWrcgrUKIt7NfWty28s2PkMvF18`. The destination must remain private; grant Editor access only to the Google account that owns/runs the Apps Script.
+
+1. Open the **CREATIVE UPLOADINGS** spreadsheet, then **Extensions → Apps Script**. Replace the editor contents with the repository's `Code.gs` and save.
+2. Run `setupCreativeChangeAudit()` from the Apps Script editor and approve the requested spreadsheet permissions. This creates the destination's **Daily Report** tab and installs an edit trigger on the source spreadsheet.
+3. Run `generateAuditApiToken()` once. Copy the token from the Apps Script execution log directly into your server configuration. Do not send it in chat or commit it.
+4. In Apps Script, choose **Deploy → New deployment → Web app**. Set **Execute as** to yourself and **Who has access** to **Anyone**, then deploy and copy the web app URL. The endpoint is callable publicly, but it returns audit rows only when the secret token is supplied; keep that token private and rotate it by running `generateAuditApiToken()` again if exposed.
+5. Configure these server-side environment variables; never put either value in `index.html` or another client-side file:
+
+   - `AUDIT_WEB_APP_URL` — the deployed Apps Script web app URL
+   - `AUDIT_API_TOKEN` — the token from step 3
+
+   On Vercel, add both under **Project → Settings → Environment Variables**, then redeploy. For local development, set them in the same PowerShell process used to start the app:
+
+   ```powershell
+   $env:AUDIT_WEB_APP_URL = "your-deployed-web-app-url"
+   $env:AUDIT_API_TOKEN = "your-generated-token"
+   python app_server.py
+   ```
+
+The app fetches a selected day's events through an admin-session-protected API route. Regular `/api/sync` responses do not contain audit events. Logging begins only after the trigger is installed; earlier Done entries cannot be attributed retroactively. Google Apps Script deployments configured as **Anyone** are bearer-token protected rather than Google-login protected, so treat the token like a password and rotate it immediately if it is disclosed. If your Google Workspace policy does not allow **Anyone** deployments, the server cannot call this endpoint without an additional Google-authenticated integration.
+
 ## Device requirements and behavior
 
 - **Android:** Use current Chrome (or another browser supporting Web Push). HTTPS is required; installing the app from the browser menu is recommended.

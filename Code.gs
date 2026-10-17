@@ -1,4 +1,6 @@
-const AUDIT_SHEET_NAME = 'Creative Change Audit';
+const AUDIT_SHEET_NAME = 'Daily Report';
+const AUDIT_SPREADSHEET_ID = '1iDQoBTDHsrfavBA4iWrcgrUKIt7NfWty28s2PkMvF18';
+const AUDIT_API_TOKEN_PROPERTY = 'AUDIT_API_TOKEN';
 const AUDIT_HEADERS = [
   'Event ID',
   'Timestamp',
@@ -13,10 +15,11 @@ const AUDIT_HEADERS = [
 const AUDIT_MAX_ROWS = 5000;
 
 function setupCreativeChangeAudit() {
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  let auditSheet = spreadsheet.getSheetByName(AUDIT_SHEET_NAME);
+  const sourceSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const auditSpreadsheet = SpreadsheetApp.openById(AUDIT_SPREADSHEET_ID);
+  let auditSheet = auditSpreadsheet.getSheetByName(AUDIT_SHEET_NAME);
   if (!auditSheet) {
-    auditSheet = spreadsheet.insertSheet(AUDIT_SHEET_NAME);
+    auditSheet = auditSpreadsheet.insertSheet(AUDIT_SHEET_NAME);
   }
 
   if (auditSheet.getLastRow() === 0) {
@@ -34,13 +37,22 @@ function setupCreativeChangeAudit() {
   const alreadyInstalled = ScriptApp.getProjectTriggers().some(
     trigger => trigger.getHandlerFunction() === 'recordCreativeChange'
       && trigger.getEventType() === ScriptApp.EventType.ON_EDIT
+      && trigger.getTriggerSourceId() === sourceSpreadsheet.getId()
   );
   if (!alreadyInstalled) {
     ScriptApp.newTrigger('recordCreativeChange')
-      .forSpreadsheet(spreadsheet)
+      .forSpreadsheet(sourceSpreadsheet)
       .onEdit()
       .create();
   }
+}
+
+function generateAuditApiToken() {
+  const token = `${Utilities.getUuid().replace(/-/g, '')}${Utilities.getUuid().replace(/-/g, '')}`;
+  PropertiesService.getScriptProperties().setProperty(AUDIT_API_TOKEN_PROPERTY, token);
+  Logger.log('Copy this one-time token into the app server environment variable AUDIT_API_TOKEN:');
+  Logger.log(token);
+  return token;
 }
 
 function recordCreativeChange(event) {
@@ -48,10 +60,10 @@ function recordCreativeChange(event) {
 
   const range = event.range;
   const sheet = range.getSheet();
-  if (sheet.getName() === AUDIT_SHEET_NAME) return;
+  if (sheet.getName().trim().toLowerCase() === AUDIT_SHEET_NAME.toLowerCase()) return;
 
-  const spreadsheet = event.source || sheet.getParent();
-  const auditSheet = spreadsheet.getSheetByName(AUDIT_SHEET_NAME);
+  const auditSpreadsheet = SpreadsheetApp.openById(AUDIT_SPREADSHEET_ID);
+  const auditSheet = auditSpreadsheet.getSheetByName(AUDIT_SHEET_NAME);
   if (!auditSheet) return;
 
   const editedRow = range.getRow();
@@ -74,7 +86,7 @@ function recordCreativeChange(event) {
     ? (event.oldValue || '')
     : '[Previous values unavailable for multi-cell edits]';
   const newValue = JSON.stringify(range.getDisplayValues());
-  const lock = LockService.getDocumentLock();
+  const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
     auditSheet.appendRow([
@@ -90,12 +102,84 @@ function recordCreativeChange(event) {
     ]);
 
     const excessRows = auditSheet.getLastRow() - AUDIT_MAX_ROWS;
-    if (excessRows > 1) {
+    if (excessRows > 0) {
       auditSheet.deleteRows(2, excessRows);
     }
   } finally {
     lock.releaseLock();
   }
+}
+
+function doPost(event) {
+  try {
+    const payload = JSON.parse(event?.postData?.contents || '{}');
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return jsonResponse_({ success: false, error: 'Invalid request.' });
+    }
+    const expectedToken = PropertiesService.getScriptProperties()
+      .getProperty(AUDIT_API_TOKEN_PROPERTY) || '';
+    if (!expectedToken || !payload.token || !constantTimeEquals_(String(payload.token), expectedToken)) {
+      return jsonResponse_({ success: false, error: 'Unauthorized.' });
+    }
+    if (payload.action !== 'get_daily_report') {
+      return jsonResponse_({ success: false, error: 'Unsupported action.' });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(payload.date || ''))) {
+      return jsonResponse_({ success: false, error: 'A valid report date is required.' });
+    }
+
+    const auditSpreadsheet = SpreadsheetApp.openById(AUDIT_SPREADSHEET_ID);
+    const auditSheet = auditSpreadsheet.getSheetByName(AUDIT_SHEET_NAME);
+    if (!auditSheet || auditSheet.getLastRow() < 1) {
+      return jsonResponse_({ success: true, tracking_enabled: false, events: [] });
+    }
+
+    const rows = auditSheet.getDataRange().getValues();
+    const headers = rows[0].map(value => String(value || '').trim().toLowerCase());
+    const columns = Object.fromEntries(headers.map((header, index) => [header, index]));
+    if (AUDIT_HEADERS.some(header => columns[header.toLowerCase()] === undefined)) {
+      return jsonResponse_({ success: false, error: 'The Daily Report header row is invalid.' });
+    }
+
+    const timezone = auditSpreadsheet.getSpreadsheetTimeZone();
+    const events = [];
+    for (const row of rows.slice(1)) {
+      const timestamp = row[columns.timestamp];
+      if (!(timestamp instanceof Date) || isNaN(timestamp.getTime())) continue;
+      if (Utilities.formatDate(timestamp, timezone, 'yyyy-MM-dd') !== payload.date) continue;
+
+      events.push({
+        id: String(row[columns['event id']] || ''),
+        timestamp: Utilities.formatDate(timestamp, timezone, "yyyy-MM-dd'T'HH:mm:ss"),
+        editor: String(row[columns.editor] || ''),
+        sheet: String(row[columns.sheet] || ''),
+        et: String(row[columns['et / creative']] || ''),
+        range: String(row[columns.range] || ''),
+        column: String(row[columns.column] || ''),
+        old_value: String(row[columns['old value']] || ''),
+        new_value: String(row[columns['new value']] || '')
+      });
+    }
+    return jsonResponse_({ success: true, tracking_enabled: true, events: events.slice(-5000) });
+  } catch (error) {
+    console.error('Daily Report API failed:', error);
+    return jsonResponse_({ success: false, error: 'Could not read the Daily Report.' });
+  }
+}
+
+function constantTimeEquals_(left, right) {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index++) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
+}
+
+function jsonResponse_(value) {
+  return ContentService
+    .createTextOutput(JSON.stringify(value))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 function getEditorEmail(event) {

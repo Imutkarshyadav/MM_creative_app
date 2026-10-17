@@ -16,10 +16,13 @@ from api.index import (
     admin_api_request,
     extract_sheet_cell_colors,
     extract_sheet_tab_colors,
+    get_admin_settings,
+    get_daily_report_events,
     get_missing_stock_campaign_codes,
     is_completed_status,
     load_missing_stock,
     MISSING_STOCK_SHEET_URL,
+    is_valid_admin_session,
     spreadsheet_column_name
 )
 
@@ -81,6 +84,58 @@ def save_history(history):
         json.dump(history, f, indent=2)
 
 class SyncHandler(http.server.SimpleHTTPRequestHandler):
+    def send_json_response(self, status, payload):
+        response = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(response)
+
+    def handle_daily_report(self, query):
+        try:
+            cookies = SimpleCookie()
+            cookies.load(self.headers.get("Cookie", ""))
+            session_cookie = cookies.get(ADMIN_COOKIE_NAME)
+            settings = get_admin_settings()
+            if not is_valid_admin_session(
+                session_cookie.value if session_cookie else "",
+                settings
+            ):
+                self.send_json_response(401, {
+                    "success": False,
+                    "error": "Admin sign-in is required."
+                })
+                return
+
+            report_date = urllib.parse.parse_qs(query).get("date", [""])[0]
+            try:
+                parsed_date = datetime.strptime(report_date, "%Y-%m-%d").date()
+            except ValueError:
+                self.send_json_response(400, {
+                    "success": False,
+                    "error": "A valid report date is required."
+                })
+                return
+            if parsed_date.isoformat() != report_date:
+                self.send_json_response(400, {
+                    "success": False,
+                    "error": "A valid report date is required."
+                })
+                return
+
+            report = get_daily_report_events(report_date)
+            self.send_json_response(200, {"success": True, **report})
+        except CookieError:
+            self.send_json_response(400, {
+                "success": False,
+                "error": "Invalid session cookie."
+            })
+        except RuntimeError as error:
+            print(f"Daily Report request failed: {error}")
+            self.send_json_response(503, {"success": False, "error": str(error)})
+
     def handle_admin_api(self, method):
         payload = {}
         if method != "GET":
@@ -160,6 +215,9 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
         parsed_path = urllib.parse.urlsplit(self.path)
         if parsed_path.path == "/api/admin/config":
             self.handle_admin_api("GET")
+            return
+        if parsed_path.path == "/api/admin/daily-report":
+            self.handle_daily_report(parsed_path.query)
             return
 
         if parsed_path.path == '/api/missing-stock':
@@ -274,6 +332,8 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
                         rows = workbook.get_sheet_by_name(tab_name).to_python()
                         if not rows:
                             continue
+                        if tab_name.strip().casefold() == "daily report":
+                            continue
 
                         headers = rows[0]
                         date_col = 0
@@ -367,7 +427,10 @@ class SyncHandler(http.server.SimpleHTTPRequestHandler):
                     cache["data"] = results
                     cache["local_date"] = client_today.isoformat()
                     cache["response_body"] = json.dumps(
-                        {"success": True, "data": results},
+                        {
+                            "success": True,
+                            "data": results
+                        },
                         separators=(",", ":")
                     ).encode("utf-8")
                     cache["gzip_body"] = gzip.compress(
