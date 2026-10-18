@@ -1,6 +1,7 @@
 const AUDIT_SHEET_NAME = 'Daily Report';
 const AUDIT_SPREADSHEET_ID = '1iDQoBTDHsrfavBA4iWrcgrUKIt7NfWty28s2PkMvF18';
 const AUDIT_API_TOKEN_PROPERTY = 'AUDIT_API_TOKEN';
+const AUDIT_SOURCE_SPREADSHEET_PROPERTY = 'AUDIT_SOURCE_SPREADSHEET_ID';
 const AUDIT_HEADERS = [
   'Event ID',
   'Timestamp',
@@ -12,10 +13,12 @@ const AUDIT_HEADERS = [
   'Old Value',
   'New Value'
 ];
-const AUDIT_MAX_ROWS = 5000;
 
 function setupCreativeChangeAudit() {
   const sourceSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  if (!sourceSpreadsheet) {
+    throw new Error('Open the source spreadsheet before running audit setup.');
+  }
   const auditSpreadsheet = SpreadsheetApp.openById(AUDIT_SPREADSHEET_ID);
   let auditSheet = auditSpreadsheet.getSheetByName(AUDIT_SHEET_NAME);
   if (!auditSheet) {
@@ -45,6 +48,10 @@ function setupCreativeChangeAudit() {
       .onEdit()
       .create();
   }
+  PropertiesService.getScriptProperties().setProperty(
+    AUDIT_SOURCE_SPREADSHEET_PROPERTY,
+    sourceSpreadsheet.getId()
+  );
 }
 
 function generateAuditApiToken() {
@@ -66,30 +73,30 @@ function recordCreativeChange(event) {
   const auditSheet = auditSpreadsheet.getSheetByName(AUDIT_SHEET_NAME);
   if (!auditSheet) return;
 
-  const editedRow = range.getRow();
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
-  const creativeColumn = headers.findIndex(header => /creative/i.test(header)) + 1;
-  let creativeName = '';
-  if (creativeColumn > 0) {
-    creativeName = sheet.getRange(editedRow, creativeColumn).getDisplayValue();
-    if (!creativeName && range.getColumn() <= creativeColumn
-      && range.getLastColumn() >= creativeColumn) {
-      creativeName = event.oldValue || '';
-    }
-  }
-
-  const columnName = range.getNumColumns() === 1
-    ? (headers[range.getColumn() - 1] || range.getA1Notation())
-    : range.getA1Notation();
+  const headerInfo = findAuditHeaders_(sheet);
   const editor = getEditorEmail(event);
-  const oldValue = range.getNumRows() === 1 && range.getNumColumns() === 1
-    ? (event.oldValue || '')
-    : '[Previous values unavailable for multi-cell edits]';
-  const newValue = JSON.stringify(range.getDisplayValues());
-  const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-  try {
-    auditSheet.appendRow([
+  const editValues = range.getDisplayValues();
+  const editIsSingleCell = range.getNumRows() === 1 && range.getNumColumns() === 1;
+  const statusColumn = headerInfo.statusColumn;
+  const statusIsIncluded = statusColumn !== null
+    && range.getColumn() <= statusColumn
+    && range.getLastColumn() >= statusColumn;
+  const auditRows = [];
+
+  if (!statusIsIncluded || !editIsSingleCell) {
+    const editedRow = range.getRow();
+    let creativeName = '';
+    if (headerInfo.creativeColumn !== null) {
+      creativeName = sheet.getRange(editedRow, headerInfo.creativeColumn).getDisplayValue();
+      if (!creativeName && range.getColumn() <= headerInfo.creativeColumn
+        && range.getLastColumn() >= headerInfo.creativeColumn) {
+        creativeName = event.oldValue || '';
+      }
+    }
+    const columnName = editIsSingleCell
+      ? headerInfo.headers[range.getColumn() - 1] || range.getA1Notation()
+      : range.getA1Notation();
+    auditRows.push([
       Utilities.getUuid(),
       new Date(),
       editor || 'Editor identity unavailable',
@@ -97,17 +104,131 @@ function recordCreativeChange(event) {
       creativeName,
       range.getA1Notation(),
       columnName,
-      oldValue,
-      newValue
+      editIsSingleCell ? (event.oldValue || '') : '[Previous values unavailable for multi-cell edits]',
+      JSON.stringify(editValues)
     ]);
+  }
 
-    const excessRows = auditSheet.getLastRow() - AUDIT_MAX_ROWS;
-    if (excessRows > 0) {
-      auditSheet.deleteRows(2, excessRows);
+  if (statusIsIncluded) {
+    const firstStatusRow = range.getRow();
+    const lastStatusRow = range.getLastRow();
+    const statusOffset = statusColumn - range.getColumn();
+    const creativeNames = headerInfo.creativeColumn === null
+      ? []
+      : sheet.getRange(
+        firstStatusRow,
+        headerInfo.creativeColumn,
+        lastStatusRow - firstStatusRow + 1,
+        1
+      ).getDisplayValues().map(row => row[0]);
+    for (let row = firstStatusRow; row <= lastStatusRow; row++) {
+      const creativeName = creativeNames[row - firstStatusRow] || '';
+      const statusValue = editValues[row - firstStatusRow][statusOffset];
+      const isSingleStatusCell = editIsSingleCell;
+      auditRows.push([
+        Utilities.getUuid(),
+        new Date(),
+        editor || 'Editor identity unavailable',
+        sheet.getName(),
+        creativeName,
+        `${auditColumnName_(statusColumn)}${row}`,
+        headerInfo.headers[statusColumn - 1] || 'Status',
+        isSingleStatusCell ? (event.oldValue || '') : '[Previous values unavailable for multi-cell edits]',
+        JSON.stringify([[statusValue]])
+      ]);
     }
+  }
+
+  if (!auditRows.length) return;
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const firstRow = auditSheet.getLastRow() + 1;
+    auditSheet.getRange(firstRow, 1, auditRows.length, AUDIT_HEADERS.length).setValues(auditRows);
   } finally {
     lock.releaseLock();
   }
+}
+
+function auditColumnName_(columnIndex) {
+  let column = columnIndex;
+  let name = '';
+  while (column > 0) {
+    const remainder = (column - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    column = Math.floor((column - 1) / 26);
+  }
+  return name;
+}
+
+function findAuditHeaders_(sheet) {
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  if (!lastRow || !lastColumn) {
+    return { row: 1, headers: [], creativeColumn: null, statusColumn: null };
+  }
+  const rowsToCheck = Math.min(lastRow, 25);
+  const values = sheet.getRange(1, 1, rowsToCheck, lastColumn).getDisplayValues();
+  for (let rowIndex = 0; rowIndex < values.length; rowIndex++) {
+    const headers = values[rowIndex];
+    const creativeColumnIndex = headers.findIndex(header => /creative/i.test(header));
+    const statusColumnIndex = headers.findIndex(header => /status/i.test(header));
+    if (creativeColumnIndex !== -1 && statusColumnIndex !== -1) {
+      return {
+        row: rowIndex + 1,
+        headers,
+        creativeColumn: creativeColumnIndex + 1,
+        statusColumn: statusColumnIndex + 1
+      };
+    }
+  }
+  return {
+    row: 1,
+    headers: values[0] || [],
+    creativeColumn: null,
+    statusColumn: null
+  };
+}
+
+function isAuditDoneStatus_(value) {
+  const status = String(value || '').trim().toUpperCase();
+  return status.includes('DONE') || status === 'Y';
+}
+
+function getCurrentDoneCreatives_() {
+  const sourceSpreadsheetId = PropertiesService.getScriptProperties()
+    .getProperty(AUDIT_SOURCE_SPREADSHEET_PROPERTY);
+  if (!sourceSpreadsheetId) {
+    throw new Error('Run setupCreativeChangeAudit() to connect the source spreadsheet.');
+  }
+
+  const sourceSpreadsheet = SpreadsheetApp.openById(sourceSpreadsheetId);
+  const creatives = [];
+  for (const sheet of sourceSpreadsheet.getSheets()) {
+    if (sheet.getName().trim().toLowerCase() === AUDIT_SHEET_NAME.toLowerCase()) continue;
+    const headerInfo = findAuditHeaders_(sheet);
+    if (headerInfo.creativeColumn === null || headerInfo.statusColumn === null) continue;
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= headerInfo.row) continue;
+    const rowCount = lastRow - headerInfo.row;
+    const values = sheet
+      .getRange(headerInfo.row + 1, 1, rowCount, sheet.getLastColumn())
+      .getDisplayValues();
+    for (let offset = 0; offset < values.length; offset++) {
+      const row = values[offset];
+      const creative = String(row[headerInfo.creativeColumn - 1] || '').trim();
+      const status = row[headerInfo.statusColumn - 1];
+      if (!creative || !isAuditDoneStatus_(status)) continue;
+      const sheetRow = headerInfo.row + offset + 1;
+      creatives.push({
+        sheet: sheet.getName(),
+        creative,
+        range: `${auditColumnName_(headerInfo.statusColumn)}${sheetRow}`
+      });
+    }
+  }
+  return creatives;
 }
 
 function doPost(event) {
@@ -128,10 +249,19 @@ function doPost(event) {
       return jsonResponse_({ success: false, error: 'A valid report date is required.' });
     }
 
+    const currentDone = getCurrentDoneCreatives_();
+    const currentDoneKeys = new Set(
+      currentDone.map(item => `${item.sheet}\u0000${item.range}`)
+    );
     const auditSpreadsheet = SpreadsheetApp.openById(AUDIT_SPREADSHEET_ID);
     const auditSheet = auditSpreadsheet.getSheetByName(AUDIT_SHEET_NAME);
     if (!auditSheet || auditSheet.getLastRow() < 1) {
-      return jsonResponse_({ success: true, tracking_enabled: false, events: [] });
+      return jsonResponse_({
+        success: true,
+        tracking_enabled: false,
+        events: [],
+        current_done: currentDone
+      });
     }
 
     const rows = auditSheet.getDataRange().getValues();
@@ -142,25 +272,32 @@ function doPost(event) {
     }
 
     const timezone = auditSpreadsheet.getSpreadsheetTimeZone();
-    const events = [];
+    const latestEventsByCell = new Map();
     for (const row of rows.slice(1)) {
       const timestamp = row[columns.timestamp];
       if (!(timestamp instanceof Date) || isNaN(timestamp.getTime())) continue;
-      if (Utilities.formatDate(timestamp, timezone, 'yyyy-MM-dd') !== payload.date) continue;
-
-      events.push({
+      const sheetName = String(row[columns.sheet] || '');
+      const range = String(row[columns.range] || '');
+      const column = String(row[columns.column] || '');
+      if (!/status/i.test(column) || !currentDoneKeys.has(`${sheetName}\u0000${range}`)) continue;
+      latestEventsByCell.set(`${sheetName}\u0000${range}`, {
         id: String(row[columns['event id']] || ''),
         timestamp: Utilities.formatDate(timestamp, timezone, "yyyy-MM-dd'T'HH:mm:ss"),
         editor: String(row[columns.editor] || ''),
-        sheet: String(row[columns.sheet] || ''),
+        sheet: sheetName,
         et: String(row[columns['et / creative']] || ''),
-        range: String(row[columns.range] || ''),
-        column: String(row[columns.column] || ''),
+        range,
+        column,
         old_value: String(row[columns['old value']] || ''),
         new_value: String(row[columns['new value']] || '')
       });
     }
-    return jsonResponse_({ success: true, tracking_enabled: true, events: events.slice(-5000) });
+    return jsonResponse_({
+      success: true,
+      tracking_enabled: true,
+      events: Array.from(latestEventsByCell.values()),
+      current_done: currentDone
+    });
   } catch (error) {
     console.error('Daily Report API failed:', error);
     return jsonResponse_({ success: false, error: 'Could not read the Daily Report.' });

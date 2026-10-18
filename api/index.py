@@ -183,8 +183,16 @@ def get_daily_report_events(report_date):
     events = result.get("events")
     if not isinstance(events, list) or any(not isinstance(event, dict) for event in events):
         raise RuntimeError("The private audit endpoint returned an invalid event list.")
+    current_done = result.get("current_done")
+    if not isinstance(current_done, list) or any(
+        not isinstance(item, dict)
+        or not all(isinstance(item.get(field), str) for field in ("sheet", "creative", "range"))
+        for item in current_done
+    ):
+        raise RuntimeError("The private audit endpoint returned an invalid current Done list.")
     return {
         "events": events,
+        "current_done": current_done,
         "tracking_enabled": result.get("tracking_enabled") is True
     }
 
