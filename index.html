@@ -557,6 +557,8 @@
         let adminConfigurationError = '';
         let auditEvents = [];
         let auditCurrentDone = [];
+        let auditSourceSheetCount = 0;
+        let auditMatchedSheetCount = 0;
         let auditTrackingEnabled = false;
         let auditDataLoaded = false;
         let auditLoadError = '';
@@ -1820,11 +1822,17 @@
                 if (requestSequence !== auditRequestSequence) return;
                 auditEvents = Array.isArray(result.events) ? result.events : [];
                 auditCurrentDone = Array.isArray(result.current_done) ? result.current_done : [];
+                auditSourceSheetCount = Number.isInteger(result.sheets_scanned) ? result.sheets_scanned : 0;
+                auditMatchedSheetCount = Number.isInteger(result.sheets_with_status_headers)
+                    ? result.sheets_with_status_headers
+                    : 0;
                 auditTrackingEnabled = result.tracking_enabled === true;
             } catch (error) {
                 if (requestSequence !== auditRequestSequence) return;
                 auditEvents = [];
                 auditCurrentDone = [];
+                auditSourceSheetCount = 0;
+                auditMatchedSheetCount = 0;
                 auditTrackingEnabled = false;
                 auditLoadError = error.message || 'Could not load the private audit report.';
                 console.error('Could not load the private Daily Report:', error);
@@ -1847,11 +1855,6 @@
                 container.innerHTML = `<p class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-5 text-sm text-rose-900">${escapeHtml(auditLoadError)}</p>`;
                 return;
             }
-            if (!auditTrackingEnabled) {
-                container.innerHTML = '<p class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-5 text-sm text-amber-900">Private upload audit tracking is not set up yet. In the CREATIVE UPLOADINGS spreadsheet, open Extensions → Apps Script, run <code class="rounded bg-amber-100 px-1 py-0.5 font-bold">setupCreativeChangeAudit()</code>, and approve access to the source and separate audit spreadsheet. Then deploy the updated web app and configure its URL and token on the app server. Current Done totals can include existing rows, but uploader identity and dates are available only for edits recorded after tracking is enabled. The private audit spreadsheet is not made public.</p>';
-                return;
-            }
-
             const eventsByCell = new Map(
                 auditEvents.map(event => [`${event.sheet || ''}\u0000${event.range || ''}`, event])
             );
@@ -1954,16 +1957,26 @@
 
             const currentTotal = [...currentGroups.values()]
                 .reduce((sum, row) => sum + row.creatives.size, 0);
+            let currentStatusMessage = '';
+            if (auditMatchedSheetCount === 0) {
+                currentStatusMessage = auditSourceSheetCount === 0
+                    ? 'No source tabs were found. Confirm that the Apps Script is connected to the uploading spreadsheet.'
+                    : `No tabs with both Creative and Status headers were found (${auditSourceSheetCount} source tabs checked). Confirm the header names in the uploading sheet.`;
+            } else if (currentTotal === 0) {
+                currentStatusMessage = `No rows currently marked Done were found in ${auditMatchedSheetCount} tab${auditMatchedSheetCount === 1 ? '' : 's'} with Creative and Status headers.`;
+            }
             container.innerHTML = `
                 <section class="mb-6">
                     <h3 class="mb-1 text-sm font-black text-slate-900">Current Done on sheet</h3>
                     <p class="mb-3 text-xs text-slate-500">${currentTotal} creative${currentTotal === 1 ? '' : 's'} currently marked Done across all ET sheets. Clearing Done removes a creative from these totals on the next report load.</p>
+                    ${currentStatusMessage ? `<p class="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">${escapeHtml(currentStatusMessage)}</p>` : ''}
                     ${renderReportGroups(currentGroups, 'No creatives are currently marked Done on the sheet.')}
                 </section>
                 <section class="border-t border-slate-200 pt-5">
                     <h3 class="mb-1 text-sm font-black text-slate-900">Done on selected date and still Done</h3>
-                    <p class="mb-3 text-xs text-slate-500">Only creatives whose latest recorded status change was to Done on ${escapeHtml(dateInput.value)} are included. If Done was later removed, they are not counted.</p>
-                    ${renderReportGroups(dateGroups, `No creatives marked Done on ${escapeHtml(dateInput.value)} are still Done.`)}
+                    ${auditTrackingEnabled
+                        ? `<p class="mb-3 text-xs text-slate-500">Only creatives whose latest recorded status change was to Done on ${escapeHtml(dateInput.value)} are included. If Done was later removed, they are not counted.</p>${renderReportGroups(dateGroups, `No creatives marked Done on ${escapeHtml(dateInput.value)} are still Done.`)}`
+                        : '<p class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">Current Done rows are shown above, but uploader/date history is not enabled. Run <code class="rounded bg-amber-100 px-1 py-0.5 font-bold">setupCreativeChangeAudit()</code> in the source spreadsheet’s Apps Script, authorize it, then deploy a new web-app version. Older edits cannot be attributed retroactively.</p>'}
                 </section>`;
         }
 

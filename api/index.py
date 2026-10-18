@@ -196,9 +196,26 @@ def get_daily_report_events(report_date):
         for item in current_done
     ):
         raise RuntimeError("The private audit endpoint returned an invalid current Done list.")
+    source_sheet_count = result.get("sheets_scanned")
+    matched_sheet_count = result.get("sheets_with_status_headers")
+    if (
+        not isinstance(source_sheet_count, int)
+        or isinstance(source_sheet_count, bool)
+        or not isinstance(matched_sheet_count, int)
+        or isinstance(matched_sheet_count, bool)
+        or source_sheet_count < 0
+        or matched_sheet_count < 0
+        or matched_sheet_count > source_sheet_count
+    ):
+        raise RuntimeError(
+            "The private audit endpoint returned invalid source-sheet diagnostics. "
+            "Deploy the latest Code.gs web app version."
+        )
     return {
         "events": events,
         "current_done": current_done,
+        "sheets_scanned": source_sheet_count,
+        "sheets_with_status_headers": matched_sheet_count,
         "tracking_enabled": result.get("tracking_enabled") is True
     }
 

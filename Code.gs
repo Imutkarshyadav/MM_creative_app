@@ -204,10 +204,14 @@ function getCurrentDoneCreatives_() {
 
   const sourceSpreadsheet = SpreadsheetApp.openById(sourceSpreadsheetId);
   const creatives = [];
+  let sheetsScanned = 0;
+  let sheetsWithStatusHeaders = 0;
   for (const sheet of sourceSpreadsheet.getSheets()) {
     if (sheet.getName().trim().toLowerCase() === AUDIT_SHEET_NAME.toLowerCase()) continue;
+    sheetsScanned++;
     const headerInfo = findAuditHeaders_(sheet);
     if (headerInfo.creativeColumn === null || headerInfo.statusColumn === null) continue;
+    sheetsWithStatusHeaders++;
 
     const lastRow = sheet.getLastRow();
     if (lastRow <= headerInfo.row) continue;
@@ -228,7 +232,11 @@ function getCurrentDoneCreatives_() {
       });
     }
   }
-  return creatives;
+  return {
+    creatives,
+    sheets_scanned: sheetsScanned,
+    sheets_with_status_headers: sheetsWithStatusHeaders
+  };
 }
 
 function doPost(event) {
@@ -249,7 +257,8 @@ function doPost(event) {
       return jsonResponse_({ success: false, error: 'A valid report date is required.' });
     }
 
-    const currentDone = getCurrentDoneCreatives_();
+    const currentSnapshot = getCurrentDoneCreatives_();
+    const currentDone = currentSnapshot.creatives;
     const currentDoneKeys = new Set(
       currentDone.map(item => `${item.sheet}\u0000${item.range}`)
     );
@@ -260,7 +269,9 @@ function doPost(event) {
         success: true,
         tracking_enabled: false,
         events: [],
-        current_done: currentDone
+        current_done: currentDone,
+        sheets_scanned: currentSnapshot.sheets_scanned,
+        sheets_with_status_headers: currentSnapshot.sheets_with_status_headers
       });
     }
 
@@ -296,11 +307,16 @@ function doPost(event) {
       success: true,
       tracking_enabled: true,
       events: Array.from(latestEventsByCell.values()),
-      current_done: currentDone
+      current_done: currentDone,
+      sheets_scanned: currentSnapshot.sheets_scanned,
+      sheets_with_status_headers: currentSnapshot.sheets_with_status_headers
     });
   } catch (error) {
     console.error('Daily Report API failed:', error);
-    return jsonResponse_({ success: false, error: 'Could not read the Daily Report.' });
+    return jsonResponse_({
+      success: false,
+      error: String(error && error.message ? error.message : error)
+    });
   }
 }
 
