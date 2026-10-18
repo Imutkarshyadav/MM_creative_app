@@ -183,7 +183,13 @@ def get_daily_report_events(report_date):
     events = result.get("events")
     if not isinstance(events, list) or any(not isinstance(event, dict) for event in events):
         raise RuntimeError("The private audit endpoint returned an invalid event list.")
-    current_done = result.get("current_done")
+    if "current_done" not in result:
+        raise RuntimeError(
+            "The deployed Apps Script is outdated and did not return current Done rows. "
+            "Save the latest Code.gs, run setupCreativeChangeAudit(), deploy a new web app version, "
+            "and update AUDIT_WEB_APP_URL if the deployment URL changed."
+        )
+    current_done = result["current_done"]
     if not isinstance(current_done, list) or any(
         not isinstance(item, dict)
         or not all(isinstance(item.get(field), str) for field in ("sheet", "creative", "range"))

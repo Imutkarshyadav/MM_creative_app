@@ -61,7 +61,7 @@ The admin-only Daily Report reads its edit history from a separate, private spre
    - `AUDIT_WEB_APP_URL` — the deployed Apps Script web app URL
    - `AUDIT_API_TOKEN` — the token from step 3
 
-   On Vercel, add both under **Project → Settings → Environment Variables**, then redeploy. For local development, set them in the same PowerShell process used to start the app:
+   On Vercel, add both under **Project → Settings → Environment Variables** for the **Production** environment (and Preview too if testing previews), then redeploy the project after saving them. The dashboard code and Python API changes also require a new Vercel deployment; local changes alone do not update the hosted app. For local development, set them in the same PowerShell process used to start the app:
 
    ```powershell
    $env:AUDIT_WEB_APP_URL = "your-deployed-web-app-url"
@@ -70,6 +70,8 @@ The admin-only Daily Report reads its edit history from a separate, private spre
    ```
 
 After updating `Code.gs`, run `setupCreativeChangeAudit()` again so the source spreadsheet ID is saved, then deploy a **new version** of the web app. The app fetches the current Done rows and the latest recorded status change for each current Done cell through an admin-session-protected API route. The report shows (a) all creatives currently marked Done, grouped and ranked by uploader ID and ET, and (b) creatives whose latest recorded status change to Done was on the selected date and that are still Done now. Clearing Done removes a creative from current totals and the selected-date Done list on the next report load. Existing Done rows appear in current totals but have no uploader/date attribution unless their status edit was recorded. Regular `/api/sync` responses do not contain audit data.
+
+For Vercel, confirm the latest code is pushed to the connected Git branch, both audit variables are set for the Production environment, and a new deployment completed after the variables were saved. If the report says the Apps Script is outdated or omits `current_done`, update the Apps Script web app to a new version and verify `AUDIT_WEB_APP_URL` points to that deployment's `/exec` URL. Check the Vercel Function logs for `/api/admin/daily-report` when diagnosing server-side failures; never put the token in browser code or send it in logs or chat.
 
 The edit trigger records user edits, including status changes, in the audit sheet; logs are no longer automatically pruned and remain subject to Google Sheets storage limits. Apps Script edit triggers do not run for changes made by another script, an API integration, or formula recalculation, though the current Done snapshot still reflects the source sheet's displayed values when the report loads. Logging begins only after the trigger is installed, so earlier editor identities and dates cannot be recovered retroactively. Google Apps Script deployments configured as **Anyone** are bearer-token protected rather than Google-login protected, so treat the token like a password and rotate it immediately if it is disclosed. If your Google Workspace policy does not allow **Anyone** deployments, the server cannot call this endpoint without an additional Google-authenticated integration.
 
