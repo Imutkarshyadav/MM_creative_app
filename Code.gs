@@ -82,45 +82,18 @@ function recordCreativeChange(event) {
     && range.getColumn() <= statusColumn
     && range.getLastColumn() >= statusColumn;
   const auditRows = [];
-
-  if (!statusIsIncluded || !editIsSingleCell) {
-    const editedRow = range.getRow();
-    let creativeName = '';
-    if (headerInfo.creativeColumn !== null) {
-      creativeName = sheet.getRange(editedRow, headerInfo.creativeColumn).getDisplayValue();
-      if (!creativeName && range.getColumn() <= headerInfo.creativeColumn
-        && range.getLastColumn() >= headerInfo.creativeColumn) {
-        creativeName = event.oldValue || '';
-      }
-    }
-    const columnName = editIsSingleCell
-      ? headerInfo.headers[range.getColumn() - 1] || range.getA1Notation()
-      : range.getA1Notation();
-    auditRows.push([
-      Utilities.getUuid(),
-      new Date(),
-      editor || 'Editor identity unavailable',
-      sheet.getName(),
-      creativeName,
-      range.getA1Notation(),
-      columnName,
-      editIsSingleCell ? (event.oldValue || '') : '[Previous values unavailable for multi-cell edits]',
-      JSON.stringify(editValues)
-    ]);
-  }
+  const firstEditedRow = range.getRow();
+  const editedRowCount = range.getNumRows();
+  const creativeNames = headerInfo.creativeColumn === null
+    ? []
+    : sheet.getRange(firstEditedRow, headerInfo.creativeColumn, editedRowCount, 1)
+      .getDisplayValues()
+      .map(row => row[0] || '');
 
   if (statusIsIncluded) {
     const firstStatusRow = range.getRow();
     const lastStatusRow = range.getLastRow();
     const statusOffset = statusColumn - range.getColumn();
-    const creativeNames = headerInfo.creativeColumn === null
-      ? []
-      : sheet.getRange(
-        firstStatusRow,
-        headerInfo.creativeColumn,
-        lastStatusRow - firstStatusRow + 1,
-        1
-      ).getDisplayValues().map(row => row[0]);
     for (let row = firstStatusRow; row <= lastStatusRow; row++) {
       const creativeName = creativeNames[row - firstStatusRow] || '';
       const statusValue = editValues[row - firstStatusRow][statusOffset];
@@ -135,6 +108,27 @@ function recordCreativeChange(event) {
         headerInfo.headers[statusColumn - 1] || 'Status',
         isSingleStatusCell ? (event.oldValue || '') : '[Previous values unavailable for multi-cell edits]',
         JSON.stringify([[statusValue]])
+      ]);
+    }
+  }
+
+  for (let rowOffset = 0; rowOffset < range.getNumRows(); rowOffset++) {
+    const editedRow = firstEditedRow + rowOffset;
+    for (let columnOffset = 0; columnOffset < range.getNumColumns(); columnOffset++) {
+      const editedColumn = range.getColumn() + columnOffset;
+      if (statusIsIncluded && editedColumn === statusColumn) continue;
+      const cell = `${auditColumnName_(editedColumn)}${editedRow}`;
+      const isSingleCellEdit = editIsSingleCell;
+      auditRows.push([
+        Utilities.getUuid(),
+        new Date(),
+        editor || 'Editor identity unavailable',
+        sheet.getName(),
+        creativeNames[rowOffset] || '',
+        cell,
+        headerInfo.headers[editedColumn - 1] || cell,
+        isSingleCellEdit ? (event.oldValue || '') : '[Previous values unavailable for multi-cell edits]',
+        JSON.stringify([[editValues[rowOffset][columnOffset]]])
       ]);
     }
   }
@@ -193,6 +187,19 @@ function findAuditHeaders_(sheet) {
 function isAuditDoneStatus_(value) {
   const status = String(value || '').trim().toUpperCase();
   return status.includes('DONE') || status === 'Y';
+}
+
+function auditStatusValue_(value) {
+  try {
+    let parsed = JSON.parse(String(value || ''));
+    while (Array.isArray(parsed)) {
+      if (!parsed.length) return '';
+      parsed = parsed[0];
+    }
+    return parsed;
+  } catch (error) {
+    return value;
+  }
 }
 
 function getCurrentDoneCreatives_() {
@@ -269,6 +276,7 @@ function doPost(event) {
         success: true,
         tracking_enabled: false,
         events: [],
+        audit_history: [],
         current_done: currentDone,
         sheets_scanned: currentSnapshot.sheets_scanned,
         sheets_with_status_headers: currentSnapshot.sheets_with_status_headers
@@ -283,17 +291,41 @@ function doPost(event) {
     }
 
     const timezone = auditSpreadsheet.getSpreadsheetTimeZone();
-    const latestEventsByCell = new Map();
+    const completionByCell = new Map();
+    const auditHistory = [];
     for (const row of rows.slice(1)) {
       const timestamp = row[columns.timestamp];
       if (!(timestamp instanceof Date) || isNaN(timestamp.getTime())) continue;
       const sheetName = String(row[columns.sheet] || '');
       const range = String(row[columns.range] || '');
       const column = String(row[columns.column] || '');
-      if (!/status/i.test(column) || !currentDoneKeys.has(`${sheetName}\u0000${range}`)) continue;
-      latestEventsByCell.set(`${sheetName}\u0000${range}`, {
+      const formattedTimestamp = Utilities.formatDate(timestamp, timezone, "yyyy-MM-dd'T'HH:mm:ss");
+      if (Utilities.formatDate(timestamp, timezone, 'yyyy-MM-dd') === payload.date) {
+        auditHistory.push({
+          id: String(row[columns['event id']] || ''),
+          timestamp: formattedTimestamp,
+          editor: String(row[columns.editor] || ''),
+          sheet: sheetName,
+          et: String(row[columns['et / creative']] || ''),
+          range,
+          column,
+          old_value: String(row[columns['old value']] || ''),
+          new_value: String(row[columns['new value']] || '')
+        });
+      }
+      const cellKey = `${sheetName}\u0000${range}`;
+      if (!/status/i.test(column) || !currentDoneKeys.has(cellKey)) continue;
+      const oldDone = isAuditDoneStatus_(auditStatusValue_(row[columns['old value']]));
+      const newDone = isAuditDoneStatus_(auditStatusValue_(row[columns['new value']]));
+      if (!newDone) {
+        completionByCell.delete(cellKey);
+        continue;
+      }
+      if (oldDone) continue;
+
+      completionByCell.set(cellKey, {
         id: String(row[columns['event id']] || ''),
-        timestamp: Utilities.formatDate(timestamp, timezone, "yyyy-MM-dd'T'HH:mm:ss"),
+        timestamp: formattedTimestamp,
         editor: String(row[columns.editor] || ''),
         sheet: sheetName,
         et: String(row[columns['et / creative']] || ''),
@@ -303,11 +335,24 @@ function doPost(event) {
         new_value: String(row[columns['new value']] || '')
       });
     }
+    const completionEvents = Array.from(completionByCell.values());
+    const completionByKey = new Map(
+      completionEvents.map(event => [`${event.sheet}\u0000${event.range}`, event])
+    );
+    const currentDoneWithUploader = currentDone.map(item => {
+      const event = completionByKey.get(`${item.sheet}\u0000${item.range}`);
+      return {
+        ...item,
+        uploader_id: event ? event.editor : 'Editor identity unavailable',
+        completed_at: event ? event.timestamp : ''
+      };
+    });
     return jsonResponse_({
       success: true,
       tracking_enabled: true,
-      events: Array.from(latestEventsByCell.values()),
-      current_done: currentDone,
+      events: completionEvents,
+      audit_history: auditHistory,
+      current_done: currentDoneWithUploader,
       sheets_scanned: currentSnapshot.sheets_scanned,
       sheets_with_status_headers: currentSnapshot.sheets_with_status_headers
     });

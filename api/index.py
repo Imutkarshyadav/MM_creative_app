@@ -57,6 +57,26 @@ admin_login_attempts = {}
 admin_login_lock = threading.Lock()
 
 
+def parse_sheet_date(value):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    for date_format in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d-%b-%Y", "%d %b %Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(text, date_format).date()
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
 @app.after_request
 def compress_sync_response(response):
     if (
@@ -158,10 +178,10 @@ def get_daily_report_events(report_date):
         with urllib.request.urlopen(endpoint_request, timeout=8) as response:
             response_status = response.status
             response_content_type = response.headers.get_content_type()
-            response_body = response.read(1024 * 1024 + 1)
+            response_body = response.read(8 * 1024 * 1024 + 1)
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
         raise RuntimeError("Could not connect to the private audit endpoint.") from error
-    if len(response_body) > 1024 * 1024:
+    if len(response_body) > 8 * 1024 * 1024:
         raise RuntimeError("The private audit endpoint returned too much data.")
     try:
         result = json.loads(response_body.decode("utf-8"))
@@ -183,6 +203,17 @@ def get_daily_report_events(report_date):
     events = result.get("events")
     if not isinstance(events, list) or any(not isinstance(event, dict) for event in events):
         raise RuntimeError("The private audit endpoint returned an invalid event list.")
+    audit_history = result.get("audit_history")
+    history_fields = ("timestamp", "editor", "sheet", "et", "range", "column", "old_value", "new_value")
+    if not isinstance(audit_history, list) or any(
+        not isinstance(event, dict)
+        or not all(isinstance(event.get(field), str) for field in history_fields)
+        for event in audit_history
+    ):
+        raise RuntimeError(
+            "The deployed Apps Script does not return valid edit history. "
+            "Update Code.gs, then deploy a new web app version."
+        )
     if "current_done" not in result:
         raise RuntimeError(
             "The deployed Apps Script is outdated and did not return current Done rows. "
@@ -213,6 +244,7 @@ def get_daily_report_events(report_date):
         )
     return {
         "events": events,
+        "audit_history": audit_history,
         "current_done": current_done,
         "sheets_scanned": source_sheet_count,
         "sheets_with_status_headers": matched_sheet_count,
@@ -1271,16 +1303,9 @@ def sync_data():
                 
                 discovered_display = history[unique_key]["display_time"]
                 
-                # Date Formatting
-                if isinstance(raw_date, (date, datetime)):
-                    display_date_str = raw_date.strftime('%Y-%m-%d')
-                    filter_date_str = display_date_str
-                else:
-                    display_date_str = str(raw_date).strip().split(' ')[0]
-                    try:
-                        filter_date_str = datetime.strptime(display_date_str, '%d/%m/%Y').strftime('%Y-%m-%d')
-                    except:
-                        filter_date_str = "1970-01-01"
+                parsed_date = parse_sheet_date(raw_date)
+                display_date_str = parsed_date.isoformat() if parsed_date else str(raw_date).strip().split(' ')[0]
+                filter_date_str = parsed_date.isoformat() if parsed_date else "1970-01-01"
                         
                 raw_status_str = str(raw_status).strip() if raw_status is not None and str(raw_status).strip() else "PENDING/BLANK"
                 is_done = is_completed_status(raw_status_str)

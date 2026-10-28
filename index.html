@@ -454,7 +454,7 @@
             <header class="flex items-center justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
                 <div>
                     <p class="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Admin report</p>
-                    <h2 id="admin-daily-report-title" class="mt-1 text-lg font-black text-slate-900 sm:text-xl">Current and daily Done report</h2>
+                    <h2 id="admin-daily-report-title" class="mt-1 text-lg font-black text-slate-900 sm:text-xl">Daily Done by Gmail</h2>
                 </div>
                 <button type="button" aria-label="Close daily report" title="Close" onclick="closeAdminDailyReport()" class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900">
                     <i class="fa-solid fa-xmark" aria-hidden="true"></i>
@@ -462,7 +462,7 @@
             </header>
             <div class="min-h-0 overflow-y-auto p-4 sm:p-6">
                 <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
-                    <p class="text-xs text-slate-500">Shows the sheet’s current Done rows and selected-date Done rows that remain Done. Uploader IDs are Google emails recorded by the sheet audit.</p>
+                    <p class="text-xs text-slate-500">See which Gmail account marked each creative Done on the selected date. Creatives later cleared from Done are not counted.</p>
                     <label class="flex items-center gap-2 text-xs font-bold text-slate-700">
                         Work date
                         <input id="admin-report-date" type="date" onchange="loadAdminDailyReport()" class="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50">
@@ -557,12 +557,11 @@
         let adminConfigurationError = '';
         let auditEvents = [];
         let auditCurrentDone = [];
-        let auditSourceSheetCount = 0;
-        let auditMatchedSheetCount = 0;
         let auditTrackingEnabled = false;
         let auditDataLoaded = false;
         let auditLoadError = '';
         let auditRequestSequence = 0;
+        let auditRefreshIntervalId = null;
         let alertsEnabled = false;
         let notificationSequence = 0;
         let deferredInstallPrompt = null;
@@ -1717,6 +1716,10 @@
             modal.classList.remove('hidden');
             modal.classList.add('flex');
             loadAdminDailyReport();
+            if (auditRefreshIntervalId !== null) clearInterval(auditRefreshIntervalId);
+            auditRefreshIntervalId = setInterval(() => {
+                if (!modal.classList.contains('hidden')) loadAdminDailyReport();
+            }, 30000);
             modal.focus({ preventScroll: true });
         }
 
@@ -1724,6 +1727,10 @@
             const modal = document.getElementById('admin-daily-report-modal');
             modal.classList.add('hidden');
             modal.classList.remove('flex');
+            if (auditRefreshIntervalId !== null) {
+                clearInterval(auditRefreshIntervalId);
+                auditRefreshIntervalId = null;
+            }
             document.getElementById('admin-daily-report-btn')?.focus({ preventScroll: true });
         }
 
@@ -1822,17 +1829,11 @@
                 if (requestSequence !== auditRequestSequence) return;
                 auditEvents = Array.isArray(result.events) ? result.events : [];
                 auditCurrentDone = Array.isArray(result.current_done) ? result.current_done : [];
-                auditSourceSheetCount = Number.isInteger(result.sheets_scanned) ? result.sheets_scanned : 0;
-                auditMatchedSheetCount = Number.isInteger(result.sheets_with_status_headers)
-                    ? result.sheets_with_status_headers
-                    : 0;
                 auditTrackingEnabled = result.tracking_enabled === true;
             } catch (error) {
                 if (requestSequence !== auditRequestSequence) return;
                 auditEvents = [];
                 auditCurrentDone = [];
-                auditSourceSheetCount = 0;
-                auditMatchedSheetCount = 0;
                 auditTrackingEnabled = false;
                 auditLoadError = error.message || 'Could not load the private audit report.';
                 console.error('Could not load the private Daily Report:', error);
@@ -1858,8 +1859,7 @@
             const eventsByCell = new Map(
                 auditEvents.map(event => [`${event.sheet || ''}\u0000${event.range || ''}`, event])
             );
-            const currentGroups = new Map();
-            const dateGroups = new Map();
+            const dailyByUploader = new Map();
             for (const item of auditCurrentDone) {
                 const sheetName = String(item.sheet || '');
                 const sheet = sheetName.trim() || 'Unknown ET';
@@ -1872,111 +1872,45 @@
                 const editor = latestEventIsDone
                     ? String(event.editor || '').trim() || 'Editor identity unavailable'
                     : 'Editor identity unavailable';
-                const currentGroupKey = `${editor}\u0000${sheet}`;
-                let currentGroup = currentGroups.get(currentGroupKey);
-                if (!currentGroup) {
-                    currentGroup = { editor, sheet, creatives: new Map() };
-                    currentGroups.set(currentGroupKey, currentGroup);
-                }
-                currentGroup.creatives.set(cell, creative);
-
                 const wasAlreadyDone = event
                     && auditStatusValues(event.old_value).some(isDailyReportDoneStatus);
                 if (!latestEventIsDone || wasAlreadyDone
                     || String(event.timestamp || '').slice(0, 10) !== dateInput.value) continue;
-                const dateGroupKey = `${editor}\u0000${sheet}`;
-                let dateGroup = dateGroups.get(dateGroupKey);
-                if (!dateGroup) {
-                    dateGroup = { editor, sheet, creatives: new Map() };
-                    dateGroups.set(dateGroupKey, dateGroup);
+                let uploader = dailyByUploader.get(editor);
+                if (!uploader) {
+                    uploader = { editor, creatives: new Map() };
+                    dailyByUploader.set(editor, uploader);
                 }
-                dateGroup.creatives.set(cell, creative);
+                uploader.creatives.set(`${sheet}\u0000${cell}`, creative);
             }
 
-            function renderReportGroups(groups, emptyMessage) {
-                const rows = [...groups.values()]
-                    .sort((a, b) => a.sheet.localeCompare(b.sheet) || a.editor.localeCompare(b.editor));
-                const total = rows.reduce((sum, row) => sum + row.creatives.size, 0);
-                const totalsByUploader = new Map();
-                for (const row of rows) {
-                    totalsByUploader.set(row.editor, (totalsByUploader.get(row.editor) || 0) + row.creatives.size);
-                }
-                const uploaderRows = [...totalsByUploader.entries()]
-                    .map(([editor, count]) => ({ editor, count }))
-                    .sort((a, b) => b.count - a.count || a.editor.localeCompare(b.editor));
-                const topCount = uploaderRows.length ? uploaderRows[0].count : 0;
-                const topIds = uploaderRows
-                    .filter(row => row.count === topCount)
-                    .map(row => escapeHtml(row.editor))
-                    .join(', ');
-                return `
-                    <div class="mb-3 flex flex-wrap items-center gap-2">
-                        <span class="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">${total} creative${total === 1 ? '' : 's'} marked Done</span>
-                        <span class="rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">${rows.length} uploader / ET group${rows.length === 1 ? '' : 's'}</span>
-                    </div>
-                    ${uploaderRows.length ? `
-                        <section class="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3" aria-label="Top uploader">
-                            <p class="text-[10px] font-bold uppercase tracking-wider text-amber-800">Most Done</p>
-                            <p class="mt-1 break-all text-sm font-black text-slate-900">${topIds}</p>
-                            <p class="mt-1 text-xs font-semibold text-amber-900">${topCount} creative${topCount === 1 ? '' : 's'} marked Done</p>
-                        </section>
-                        <h4 class="mb-2 text-xs font-bold text-slate-700">Uploader totals</h4>
-                        <div class="mb-4 overflow-x-auto rounded-xl border border-slate-200">
-                            <table class="w-full min-w-[360px] text-left text-xs">
-                                <thead class="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
-                                    <tr><th class="px-3 py-2">Rank</th><th class="px-3 py-2">Uploader ID</th><th class="px-3 py-2">Done</th></tr>
-                                </thead>
-                                <tbody class="divide-y divide-slate-100">
-                                    ${uploaderRows.map((row, index) => `
-                                        <tr>
-                                            <td class="px-3 py-2 font-semibold text-slate-500">${index + 1}</td>
-                                            <td class="break-all px-3 py-2 font-semibold text-slate-800">${escapeHtml(row.editor)}</td>
-                                            <td class="px-3 py-2 font-bold text-emerald-700">${row.count}</td>
-                                        </tr>`).join('')}
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="overflow-x-auto rounded-xl border border-slate-200">
-                            <table class="w-full min-w-[640px] text-left text-xs">
-                                <thead class="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
-                                    <tr><th class="px-3 py-2">Uploader ID</th><th class="px-3 py-2">ET / upload sheet</th><th class="px-3 py-2">Done</th><th class="px-3 py-2">Creative names</th></tr>
-                                </thead>
-                                <tbody class="divide-y divide-slate-100">
-                                    ${rows.map(row => `
-                                        <tr class="align-top">
-                                            <td class="break-all px-3 py-2 font-semibold text-slate-800">${escapeHtml(row.editor)}</td>
-                                            <td class="px-3 py-2 font-semibold text-slate-700">${escapeHtml(row.sheet)}</td>
-                                            <td class="px-3 py-2 font-bold text-emerald-700">${row.creatives.size}</td>
-                                            <td class="px-3 py-2 text-slate-700">${[...row.creatives.values()].map(escapeHtml).join('<br>')}</td>
-                                        </tr>`).join('')}
-                                </tbody>
-                            </table>
-                        </div>` : `
-                        <p class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-600">${emptyMessage}</p>`}`;
-            }
-
-            const currentTotal = [...currentGroups.values()]
-                .reduce((sum, row) => sum + row.creatives.size, 0);
-            let currentStatusMessage = '';
-            if (auditMatchedSheetCount === 0) {
-                currentStatusMessage = auditSourceSheetCount === 0
-                    ? 'No source tabs were found. Confirm that the Apps Script is connected to the uploading spreadsheet.'
-                    : `No tabs with both Creative and Status headers were found (${auditSourceSheetCount} source tabs checked). Confirm the header names in the uploading sheet.`;
-            } else if (currentTotal === 0) {
-                currentStatusMessage = `No rows currently marked Done were found in ${auditMatchedSheetCount} tab${auditMatchedSheetCount === 1 ? '' : 's'} with Creative and Status headers.`;
-            }
+            const uploaderRows = [...dailyByUploader.values()]
+                .map(row => ({ ...row, count: row.creatives.size }))
+                .sort((a, b) => b.count - a.count || a.editor.localeCompare(b.editor));
+            const totalDone = uploaderRows.reduce((sum, row) => sum + row.count, 0);
             container.innerHTML = `
-                <section class="mb-6">
-                    <h3 class="mb-1 text-sm font-black text-slate-900">Current Done on sheet</h3>
-                    <p class="mb-3 text-xs text-slate-500">${currentTotal} creative${currentTotal === 1 ? '' : 's'} currently marked Done across all ET sheets. Clearing Done removes a creative from these totals on the next report load.</p>
-                    ${currentStatusMessage ? `<p class="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">${escapeHtml(currentStatusMessage)}</p>` : ''}
-                    ${renderReportGroups(currentGroups, 'No creatives are currently marked Done on the sheet.')}
-                </section>
-                <section class="border-t border-slate-200 pt-5">
-                    <h3 class="mb-1 text-sm font-black text-slate-900">Done on selected date and still Done</h3>
-                    ${auditTrackingEnabled
-                        ? `<p class="mb-3 text-xs text-slate-500">Only creatives whose latest recorded status change was to Done on ${escapeHtml(dateInput.value)} are included. If Done was later removed, they are not counted.</p>${renderReportGroups(dateGroups, `No creatives marked Done on ${escapeHtml(dateInput.value)} are still Done.`)}`
-                        : '<p class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">Current Done rows are shown above, but uploader/date history is not enabled. Run <code class="rounded bg-amber-100 px-1 py-0.5 font-bold">setupCreativeChangeAudit()</code> in the source spreadsheet’s Apps Script, authorize it, then deploy a new web-app version. Older edits cannot be attributed retroactively.</p>'}
+                <section>
+                    <h3 class="mb-1 text-sm font-black text-slate-900">Gmail accounts that marked Done</h3>
+                    <p class="mb-3 text-xs text-slate-500">${totalDone} creative${totalDone === 1 ? '' : 's'} marked Done on ${escapeHtml(dateInput.value)} and still marked Done now.</p>
+                    ${!auditTrackingEnabled
+                        ? '<p class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">Gmail attribution is not enabled yet. Run <code class="rounded bg-amber-100 px-1 py-0.5 font-bold">setupCreativeChangeAudit()</code> in the source spreadsheet’s Apps Script, authorize it, then deploy a new web-app version. Older edits cannot be attributed retroactively.</p>'
+                        : uploaderRows.length
+                            ? `<div class="overflow-x-auto rounded-xl border border-slate-200">
+                                <table class="w-full min-w-[560px] text-left text-xs">
+                                    <thead class="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+                                        <tr><th class="px-3 py-2">Gmail ID</th><th class="px-3 py-2">Done count</th><th class="px-3 py-2">Creative names</th></tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        ${uploaderRows.map(row => `
+                                            <tr class="align-top">
+                                                <td class="break-all px-3 py-2 font-semibold text-slate-800">${escapeHtml(row.editor)}</td>
+                                                <td class="px-3 py-2 font-bold text-emerald-700">${row.count}</td>
+                                                <td class="px-3 py-2 text-slate-700">${[...row.creatives.values()].map(escapeHtml).join('<br>')}</td>
+                                            </tr>`).join('')}
+                                    </tbody>
+                                </table>
+                            </div>`
+                            : `<p class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-600">No creatives marked Done on ${escapeHtml(dateInput.value)} are still Done.</p>`}
                 </section>`;
         }
 
